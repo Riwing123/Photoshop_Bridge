@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.ps-agent/schemas/ps-agent-capability-call.schema.json",
+  "title": "PS Agent Capability Call",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["capability_id"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "ps-agent/v1" },
+    "capability_id": { "type": "string", "minLength": 1 },
+    "params": { "type": "object", "additionalProperties": true },
+    "dry_run": { "type": "boolean", "default": false },
+    "user_confirmed": { "type": "boolean", "default": false },
+    "risk_acknowledged": { "type": "boolean", "default": false },
+    "workflow_id": { "type": "string" },
+    "stage_id": { "type": "string" },
+    "wait": { "type": "boolean", "default": true },
+    "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 300000 }
+  }
+}

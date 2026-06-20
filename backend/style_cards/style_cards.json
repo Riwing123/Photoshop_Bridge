@@ -1,0 +1,188 @@
+{
+  "version": 2,
+  "cards": [
+    {
+      "id": "japanese_fresh_soft_green",
+      "title": "Japanese Fresh Soft Green",
+      "aliases": ["日系清新", "日杂清新", "空气感人像", "浅绿日系", "柔和日系"],
+      "keywords": ["japanese fresh", "soft green", "airy", "pastel", "cream", "high key", "low contrast", "日系", "清新", "高调", "柔和", "奶油高光", "浅绿", "低对比"],
+      "hard_negative_keywords": ["青橙电影感", "电影感", "赛博", "霓虹", "暗调", "强反差", "重口味"],
+      "scene_types": ["portrait", "street", "outdoor", "lifestyle", "mixed"],
+      "visual_goal": "High-key, soft contrast, creamy highlights, gentle yellow-green environment, clean low-pressure color.",
+      "avoid": ["hard contrast", "muddy shadows", "over-orange skin", "neon greens", "blocked blacks", "强对比", "脏暗部", "橙红肤色", "荧光绿", "死黑"],
+      "recommended_operations": ["lift exposure", "raise black floor slightly", "reduce global contrast", "soften greens", "keep saturation restrained", "separate subject and background when their goals conflict"],
+      "parameter_bias": {
+        "exposure": 0.22,
+        "black_lift": 0.008,
+        "contrast": -12,
+        "vibrance": 10,
+        "saturation": -4,
+        "warmth": 8,
+        "green_hue": -4,
+        "green_saturation": -10,
+        "green_lightness": 5
+      },
+      "mask_guidance": ["Use global grade only for base tone.", "Separate background greens from subject skin/clothing when the source has a dark green wall or foliage.", "Protect eyes, lips, black clothing, and neutral whites from washout."],
+      "scoring_focus": ["highlight softness", "green restraint", "subject protection", "low contrast safety"]
+    },
+    {
+      "id": "transparent_landscape",
+      "title": "Transparent Landscape",
+      "aliases": ["通透风光", "清透风景", "干净风光", "蓝天通透"],
+      "keywords": ["clear landscape", "transparent", "blue sky", "clean air", "scenery", "landscape", "通透", "风光", "风景", "蓝天", "清透", "干净空气"],
+      "hard_negative_keywords": ["低饱和商业", "日系人像", "暗调电影", "青橙电影感", "室内暖调"],
+      "scene_types": ["landscape", "travel", "architecture", "outdoor"],
+      "visual_goal": "Clean air, separated sky and land, bright highlights without clipping, natural greens and blues.",
+      "avoid": ["cyan cast everywhere", "oversaturated sky", "haloed shadows", "flat haze", "全图青色偏", "天空过饱和", "暗部光晕", "灰雾"],
+      "recommended_operations": ["increase local brightness", "recover highlights", "open shadows", "moderate vibrance", "protect blues", "separate sky and vegetation when needed"],
+      "parameter_bias": {
+        "exposure": 0.12,
+        "black_lift": 0.003,
+        "contrast": 8,
+        "vibrance": 16,
+        "saturation": 2,
+        "warmth": 0,
+        "green_hue": -2,
+        "green_saturation": 4,
+        "green_lightness": 2
+      },
+      "mask_guidance": ["Use select_sky for sky-only recovery or blue control.", "Use polygon/bbox for water, vegetation, or mountain regions when global changes hurt the subject."],
+      "scoring_focus": ["sky safety", "green naturalness", "highlight detail", "shadow separation"]
+    },
+    {
+      "id": "soft_film_low_contrast",
+      "title": "Soft Film Low Contrast",
+      "aliases": ["胶片", "复古胶片", "低对比胶片", "柔和胶片"],
+      "keywords": ["film", "low contrast", "matte", "soft", "nostalgic", "vintage", "胶片", "复古", "低对比", "哑光", "柔和", "怀旧"],
+      "hard_negative_keywords": ["通透风光", "商业干净", "高反差", "霓虹", "赛博"],
+      "scene_types": ["portrait", "street", "indoor", "travel", "still_life"],
+      "visual_goal": "Matte blacks, moderate warmth, restrained saturation, soft nostalgic contrast.",
+      "avoid": ["digital sharp contrast", "pure black crush", "aggressive clarity", "over-clean white", "数码锐利", "死黑", "过清晰", "白得刺眼"],
+      "recommended_operations": ["lift blacks", "reduce contrast", "warm midtones", "lower saturation", "slightly mute greens"],
+      "parameter_bias": {
+        "exposure": 0.06,
+        "black_lift": 0.012,
+        "contrast": -18,
+        "vibrance": 2,
+        "saturation": -10,
+        "warmth": 6,
+        "green_hue": -3,
+        "green_saturation": -12,
+        "green_lightness": 1
+      },
+      "mask_guidance": ["Protect skin and whites from yellowing.", "Keep local contrast on important texture when global matte reduces punch."],
+      "scoring_focus": ["black floor", "saturation restraint", "warm midtones", "texture preservation"]
+    },
+    {
+      "id": "teal_orange_cinematic",
+      "title": "Teal Orange Cinematic",
+      "aliases": ["青橙电影感", "电影感", "冷暖电影", "青橙"],
+      "keywords": ["cinematic", "teal orange", "moody", "dramatic", "movie grade", "电影感", "青橙", "冷暖", "戏剧化", "暗调"],
+      "hard_negative_keywords": ["日系清新", "空气感", "通透风光", "低对比胶片", "商业低饱和"],
+      "scene_types": ["portrait", "street", "night", "indoor", "architecture"],
+      "visual_goal": "Cooler shadows, warmer highlights, strong but controlled color separation.",
+      "avoid": ["skin turns orange", "cyan pollution in whites", "blocked shadows", "oversaturated neon", "肤色橙红", "白色发青", "暗部堵死", "霓虹过饱和"],
+      "recommended_operations": ["cool shadows", "warm highlights", "increase mid contrast", "control saturation", "protect neutrals"],
+      "parameter_bias": {
+        "exposure": 0.0,
+        "black_lift": 0.001,
+        "contrast": 12,
+        "vibrance": 8,
+        "saturation": -2,
+        "warmth": 4,
+        "shadow_cool": 12,
+        "green_saturation": -4
+      },
+      "mask_guidance": ["Protect skin and neutral whites from cyan/orange pollution.", "Use subject/background separation when shadows need cool color but face should stay natural."],
+      "scoring_focus": ["shadow highlight separation", "neutral protection", "subject protection", "black safety"]
+    },
+    {
+      "id": "clean_commercial_low_sat",
+      "title": "Clean Commercial Low Saturation",
+      "aliases": ["低饱和商业", "商业干净", "产品干净", "电商干净"],
+      "keywords": ["commercial", "clean", "minimal", "product", "neutral", "ecommerce", "low saturation", "低饱和", "商业", "干净", "极简", "产品", "中性", "电商"],
+      "hard_negative_keywords": ["胶片", "复古", "青橙电影感", "霓虹", "强风格"],
+      "scene_types": ["product", "portrait", "interior", "still_life", "ecommerce"],
+      "visual_goal": "Neutral whites, controlled saturation, clear product or subject edges, low color contamination.",
+      "avoid": ["color cast in whites", "dirty gray background", "over-stylized hue shift", "logo color drift", "白色偏色", "背景脏灰", "过度风格化", "Logo 偏色"],
+      "recommended_operations": ["neutralize white balance", "reduce saturation", "clean highlights", "preserve brand colors"],
+      "parameter_bias": {
+        "exposure": 0.08,
+        "black_lift": 0.002,
+        "contrast": 4,
+        "vibrance": -2,
+        "saturation": -12,
+        "warmth": 0,
+        "green_saturation": -6
+      },
+      "mask_guidance": ["Protect logo and brand colors.", "Separate product from background when background needs cleanup."],
+      "scoring_focus": ["neutral whites", "brand color protection", "highlight cleanliness", "low cast"]
+    },
+    {
+      "id": "night_neon_controlled",
+      "title": "Night Neon Controlled",
+      "aliases": ["夜景霓虹", "霓虹夜景", "城市夜景", "赛博夜景"],
+      "keywords": ["night", "neon", "city", "cyber", "low light", "夜景", "霓虹", "城市", "赛博", "低光"],
+      "hard_negative_keywords": ["日系清新", "高调", "奶油高光", "通透风光", "产品白底"],
+      "scene_types": ["night", "street", "city", "portrait", "event"],
+      "visual_goal": "Keep neon color identity, open shadows carefully, protect highlight signs and skin/subject.",
+      "avoid": ["washed-out night", "clipped neon", "green/magenta skin pollution", "noise amplification", "夜景洗白", "霓虹过曝", "肤色绿紫污染", "噪点放大"],
+      "recommended_operations": ["recover highlights", "small shadow lift", "moderate vibrance", "avoid global overexposure"],
+      "parameter_bias": {
+        "exposure": 0.02,
+        "black_lift": 0.004,
+        "contrast": 6,
+        "vibrance": 12,
+        "saturation": 0,
+        "warmth": -2,
+        "green_saturation": -2
+      },
+      "mask_guidance": ["Use masks for signs, faces, and large dark regions separately.", "Never force high-key brightness on a night image."],
+      "scoring_focus": ["highlight clipping", "shadow detail", "neon saturation", "color pollution"]
+    },
+    {
+      "id": "warm_indoor_clean",
+      "title": "Warm Indoor Clean",
+      "aliases": ["室内暖调", "干净暖光", "咖啡馆暖调", "居家暖调"],
+      "keywords": ["indoor", "warm light", "clean warm", "home", "cafe", "室内", "暖光", "干净暖调", "家居", "咖啡馆"],
+      "hard_negative_keywords": ["日系清新", "青橙电影感", "夜景霓虹", "通透风光"],
+      "scene_types": ["indoor", "portrait", "food", "lifestyle", "interior"],
+      "visual_goal": "Warm but not yellow, clean whites, controlled mixed light, comfortable shadow contrast.",
+      "avoid": ["yellow whites", "green fluorescent cast", "muddy orange shadows", "flat skin or subject", "白色发黄", "荧光绿偏色", "橙色暗部脏", "主体发灰"],
+      "recommended_operations": ["reduce mixed cast", "warm highlights moderately", "open shadows", "control yellow saturation"],
+      "parameter_bias": {
+        "exposure": 0.1,
+        "black_lift": 0.004,
+        "contrast": -4,
+        "vibrance": 6,
+        "saturation": -3,
+        "warmth": 5,
+        "green_saturation": -8
+      },
+      "mask_guidance": ["Correct mixed-light casts locally when one global white balance cannot serve the whole scene."],
+      "scoring_focus": ["white neutrality", "mixed light control", "shadow comfort", "subject protection"]
+    },
+    {
+      "id": "food_bright_appetizing",
+      "title": "Food Bright Appetizing",
+      "aliases": ["美食明亮", "食物诱人", "餐厅美食", "美食暖调"],
+      "keywords": ["food", "appetizing", "bright", "warm", "restaurant", "美食", "食物", "诱人", "明亮", "暖色", "餐厅"],
+      "hard_negative_keywords": ["青橙电影感", "暗调", "低饱和商业", "夜景霓虹"],
+      "scene_types": ["food", "product", "indoor", "still_life"],
+      "visual_goal": "Bright natural food color, warm highlights, enough contrast for texture, no dirty greens.",
+      "avoid": ["gray food", "over-white plates", "green cast", "oversaturated reds", "食物发灰", "盘子过曝", "绿色偏色", "红色过饱和"],
+      "recommended_operations": ["warm slightly", "increase luminance", "moderate vibrance", "protect highlights"],
+      "parameter_bias": {
+        "exposure": 0.12,
+        "black_lift": 0.002,
+        "contrast": 6,
+        "vibrance": 12,
+        "saturation": 3,
+        "warmth": 6,
+        "green_saturation": -5
+      },
+      "mask_guidance": ["Protect plate highlights.", "Use local masks if tabletop/background color makes food look dirty."],
+      "scoring_focus": ["food color appeal", "plate highlight safety", "texture contrast", "cast control"]
+    }
+  ]
+}

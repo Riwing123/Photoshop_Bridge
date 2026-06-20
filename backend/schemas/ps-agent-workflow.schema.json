@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.ps-agent/schemas/ps-agent-workflow.schema.json",
+  "title": "PS Agent Staged Workflow",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "workflow_id", "goal", "stages", "research_policy", "review_policy", "rollback_policy"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "ps-agent/v1" },
+    "workflow_id": { "type": "string", "pattern": "^wf-[A-Za-z0-9_.:-]{1,96}$" },
+    "goal": { "type": "string", "minLength": 1 },
+    "visual_brief": { "type": "string" },
+    "research_policy": {
+      "type": "object",
+      "required": ["required_for_modifications", "sources", "must_record_findings"],
+      "additionalProperties": true,
+      "properties": {
+        "required_for_modifications": { "type": "boolean" },
+        "sources": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "must_record_findings": { "type": "boolean" },
+        "reuse_allowed_when_recent": { "type": "boolean" },
+        "max_age_hours": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/stage" }
+    },
+    "review_policy": { "type": "object", "additionalProperties": true },
+    "rollback_policy": { "type": "object", "additionalProperties": true }
+  },
+  "$defs": {
+    "stage": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "stage_id",
+        "objective",
+        "expected_result",
+        "review_regions",
+        "pass_criteria",
+        "rollback_target"
+      ],
+      "properties": {
+        "stage_id": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,64}$" },
+        "stage_type": { "type": "string" },
+        "order": { "type": "integer", "minimum": 1 },
+        "objective": { "type": "string", "minLength": 1 },
+        "expected_result": { "type": "string", "minLength": 1 },
+        "recipe_or_plan": { "type": ["object", "null"] },
+        "review_regions": { "type": "array", "items": { "type": "object" } },
+        "pass_criteria": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "rollback_target": { "type": "object", "additionalProperties": true },
+        "depends_on": { "type": "array", "items": { "type": "string" } },
+        "pre_stage_checks": { "type": "array", "items": { "type": "string" } },
+        "previous_stage_recheck": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "required": { "type": "boolean" },
+            "if_failed": { "type": "string", "enum": ["rollback_dependency", "revise_dependency", "stop"] }
+          }
+        },
+        "requires_review": { "type": "boolean" },
+        "destructive": { "type": "boolean" },
+        "user_confirmed": { "type": "boolean" },
+        "advanced": { "type": "boolean" },
+        "raw_descriptor": { "type": "boolean" }
+      }
+    }
+  }
+}

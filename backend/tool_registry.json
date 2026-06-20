@@ -1,0 +1,3848 @@
+{
+  "protocol_version": "ps-agent/v1",
+  "backend": {
+    "default_base_url": "http://127.0.0.1:17860",
+    "uxp_polling_path": "/uxp/jobs/next",
+    "uxp_result_path_template": "/uxp/jobs/{job_id}/result"
+  },
+  "default_timeout_ms": 60000,
+  "tools": [
+    {
+      "name": "ps_list_registered_tools",
+      "title": "List Photoshop Agent Tools",
+      "description": "Return the local ps-agent/v1 tool registry used by the MCP adapter.",
+      "transport": "local",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Local introspection only; does not contact Photoshop or the Python backend."
+    },
+    {
+      "name": "ps_ping_backend",
+      "title": "Ping Photoshop Agent Backend",
+      "description": "Check whether the Python backend is reachable and whether a UXP plugin heartbeat has been seen recently.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "GET",
+        "path": "/health"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "include_uxp": {
+            "type": "boolean",
+            "default": true,
+            "description": "Include the latest UXP heartbeat state when available."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use this before planning an edit to confirm the local bridge is alive."
+    },
+    {
+      "name": "ps_bridge_diagnostics",
+      "title": "Get Photoshop Bridge Diagnostics",
+      "description": "Return backend, UXP heartbeat, SQLite queue, path, PID, token, model, and recent event diagnostics for bridge troubleshooting.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/diagnostics"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use this when ps_ping_backend fails, UXP is stale, jobs are stuck, or previews/results are not returning."
+    },
+    {
+      "name": "ps_list_capabilities",
+      "title": "List Photoshop Capabilities",
+      "description": "List the internal Photoshop capability catalog exposed through the existing ps-agent tool registry.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/capabilities/list"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": { "type": "string" },
+          "status": { "type": "string" },
+          "include_advanced": { "type": "boolean", "default": false }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "This is the registry-facing entrypoint for PS capabilities. Capabilities are not separate MCP tools unless promoted."
+    },
+    {
+      "name": "ps_probe_capability",
+      "title": "Probe Photoshop Capability",
+      "description": "Return availability, safety, transport, and notes for one capability id.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/capabilities/probe"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capability_id"],
+        "properties": {
+          "capability_id": { "type": "string" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use before planning with an experimental or advanced capability."
+    },
+    {
+      "name": "ps_validate_capability_call",
+      "title": "Validate Photoshop Capability Call",
+      "description": "Validate one capability call, including destructive and raw descriptor confirmations.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/capabilities/validate-call"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["capability_id"],
+        "properties": {
+          "capability_id": { "type": "string" },
+          "params": { "type": "object" },
+          "dry_run": { "type": "boolean", "default": false },
+          "user_confirmed": { "type": "boolean", "default": false },
+          "risk_acknowledged": { "type": "boolean", "default": false }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Codex must call this before advanced or destructive capabilities."
+    },
+    {
+      "name": "ps_execute_capability",
+      "title": "Execute Photoshop Capability",
+      "description": "Execute a registered Photoshop capability through existing tools or the UXP job queue.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/capabilities/execute"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["capability_id"],
+        "properties": {
+          "capability_id": { "type": "string" },
+          "params": { "type": "object" },
+          "dry_run": { "type": "boolean", "default": false },
+          "user_confirmed": { "type": "boolean", "default": false },
+          "risk_acknowledged": { "type": "boolean", "default": false },
+          "wait": { "type": "boolean", "default": true },
+          "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 300000, "default": 60000 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": false,
+        "requires_user_confirmation": true,
+        "returns_images": false
+      },
+      "notes": "High-frequency features should still use dedicated tools. Low-frequency PS capabilities go through this generic executor. Raw batchPlay is advanced-only and requires confirmation."
+    },
+    {
+      "name": "ps_scan_asset_library",
+      "title": "Scan Design Asset Library",
+      "description": "Scan the configured design asset folder and generate thumbnails/contact sheet for Codex visual review.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/design/assets/scan"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "root_path": { "type": "string" },
+          "recursive": { "type": "boolean", "default": false },
+          "max_assets": { "type": "integer", "default": 80 },
+          "thumbnail_max_side": { "type": "integer", "default": 256 }
+        }
+      },
+      "outputSchema": { "type": "object", "additionalProperties": true },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": true
+      },
+      "notes": "Default folder is D:\\Photo_sontrol\\design_assets\\inbox or PS_AGENT_DESIGN_ASSET_ROOT. Original files are read-only; generated thumbnails live under backend/runtime/assets."
+    },
+    {
+      "name": "ps_analyze_design_assets",
+      "title": "Analyze Design Assets",
+      "description": "Compute deterministic design-oriented metrics for scanned assets: dimensions, aspect ratio, alpha, colors, and suggested roles.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/design/assets/analyze"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "scan_result": { "type": "object" },
+          "root_path": { "type": "string" },
+          "max_colors": { "type": "integer", "default": 6 }
+        }
+      },
+      "outputSchema": { "type": "object", "additionalProperties": true },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Codex still performs semantic visual understanding from the contact sheet; this tool provides stable metrics only."
+    },
+    {
+      "name": "ps_prepare_asset_variant",
+      "title": "Prepare Design Asset Variant",
+      "description": "Copy/crop/resize a source asset from the design asset folder into backend runtime assets for Photoshop placement.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/design/assets/prepare-variant"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["asset_path"],
+        "properties": {
+          "asset_path": { "type": "string" },
+          "crop": { "type": "object" },
+          "max_side": { "type": "integer" },
+          "variant_id": { "type": "string" }
+        }
+      },
+      "outputSchema": { "type": "object", "additionalProperties": true },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": true
+      },
+      "notes": "Use before asset.place_embedded. The source asset must stay inside the configured design asset root."
+    },
+    {
+      "name": "ps_create_design_plan",
+      "title": "Create Design Workflow Plan",
+      "description": "Create a Design Overlay v2 planning container with design_brief, design_lock, layer_graph, and staged workflow slots for posters, panels, collages, covers, cards, or commercial materials.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/design/create-plan"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "goal": { "type": "string" },
+          "design_type": { "type": "string" },
+          "canvas": { "type": "object" },
+          "design_overlay": { "type": "object" },
+          "design_brief": { "type": "object" },
+          "design_lock": { "type": "object" },
+          "asset_brief": { "type": "object" },
+          "layer_graph": { "type": "object" },
+          "asset_manifest": {},
+          "research_findings": { "type": "array" }
+        }
+      },
+      "outputSchema": { "type": "object", "additionalProperties": true },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Design is a planning overlay, not a separate execution universe. Codex owns design_brief/layer_graph decisions; execution must lower into shared operation_recipe or selection_recipe atoms."
+    },
+    {
+      "name": "ps_validate_design_plan",
+      "title": "Validate Design Workflow Plan",
+      "description": "Validate a Design Overlay v2 plan, including design_lock completeness, layer_graph node/edge references, rollback targets, and atom executability.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/design/validate-plan"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["design_plan"],
+        "properties": {
+          "design_plan": { "type": "object" }
+        }
+      },
+      "outputSchema": { "type": "object", "additionalProperties": true },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Stages without operation_recipe or selection_recipe are allowed as planning stages. Executable stages must use known non-planned shared atoms, or lower valid layer_graph nodes first."
+    },
+    {
+      "name": "ps_compile_svg_object",
+      "title": "Compile SVG Vector Object",
+      "description": "Compile one visual-style-layered vector object into deterministic SVG assets and an operation_recipe fragment without modifying Photoshop.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/svg/compile-object"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["vector_object"],
+        "properties": {
+          "vector_object": { "type": "object" }
+        }
+      },
+      "outputSchema": { "type": "object", "additionalProperties": true },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Inspect visual-layer sharding, SVG hashes, complexity, and lowered placement/group steps before Photoshop execution."
+    },    {
+      "name": "ps_lower_design_stage_to_operation_recipe",
+      "title": "Lower Design Stage",
+      "description": "Lower one Design Overlay v2 stage into a shared operation_recipe or selection_recipe without making Photoshop changes.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/design/lower-stage"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["design_plan", "stage_id"],
+        "properties": {
+          "design_plan": { "type": "object" },
+          "stage_id": { "type": "string" }
+        }
+      },
+      "outputSchema": { "type": "object", "additionalProperties": true },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "This is a structural lowerer only. It never performs aesthetic choices and never emits raw Photoshop JavaScript."
+    },
+    {
+      "name": "ps_apply_design_stage",
+      "title": "Apply Design Stage",
+      "description": "Execute exactly one design stage by lowering it into a shared operation_recipe or selection_recipe.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/design/apply-stage"
+      },
+      "job_type": "operation_recipe",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["design_plan", "stage_id"],
+        "properties": {
+          "design_plan": { "type": "object" },
+          "stage_id": { "type": "string" },
+          "wait": { "type": "boolean", "default": true },
+          "timeout_ms": { "type": "integer", "default": 120000 }
+        }
+      },
+      "outputSchema": { "type": "object", "additionalProperties": true },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": false,
+        "requires_user_confirmation": true,
+        "returns_images": false
+      },
+      "notes": "Apply exactly one stage, then export preview/crops and review before continuing. Operation stages queue operation_recipe jobs; selection stages use the shared selection_recipe path."
+    },
+    {
+      "name": "ps_review_design_stage",
+      "title": "Review Design Stage",
+      "description": "Return review checklist and feedback mapping for a completed design stage.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/design/review-stage"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "workflow_id": { "type": "string" },
+          "stage_id": { "type": "string" },
+          "block_id": { "type": "string" },
+          "asset_id": { "type": "string" }
+        }
+      },
+      "outputSchema": { "type": "object", "additionalProperties": true },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Visual judgment remains Codex/user-driven; this tool standardizes review mapping."
+    },
+    {
+      "name": "ps_export_design_package",
+      "title": "Export Design Package",
+      "description": "Return export defaults and output root for design deliverables; first implementation delegates flattened export to ps_export_preview.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/design/export-package"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "format": { "type": "string", "default": "png" },
+          "max_side": { "type": "integer", "default": 4096 },
+          "quality": { "type": "integer", "default": 10 }
+        }
+      },
+      "outputSchema": { "type": "object", "additionalProperties": true },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use returned export_preview_payload with ps_export_preview for flattened preview/export in v1."
+    },
+    {
+      "name": "ps_list_operation_atoms",
+      "title": "List Operation Atoms",
+      "description": "List low-level Photoshop operation components for design, layer, asset, text, shape, filter, adjustment, mask, selection-clear, and preview recipes.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/operation-atoms/list"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": { "type": "string" },
+          "include_details": { "type": "boolean", "default": true }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use this before composing open-ended layer/effect recipes. Atoms are capabilities, not aesthetic presets."
+    },
+    {
+      "name": "ps_list_selection_atoms",
+      "title": "List Selection And Mask Atoms",
+      "description": "List native, geometry, local-model, channel/alpha, and refinement selection components with hard-selection and soft-alpha bus metadata.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/selection-atoms/list"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": { "type": "string" },
+          "bus": { "type": "string", "enum": ["hard_selection", "soft_alpha", "detector"] },
+          "include_details": { "type": "boolean", "default": true }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use this during mask_strategy and mask_preparation. Selection atoms are equal-status candidates; do not hard-route sky/subject/object classes to one atom."
+    },
+    {
+      "name": "ps_validate_operation_recipe",
+      "title": "Validate Operation Recipe",
+      "description": "Validate a sequence of low-level Photoshop operation atoms before UXP execution.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/operation-recipe/validate"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["operation_recipe"],
+        "properties": {
+          "operation_recipe": { "type": "object" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Codex must validate operation recipes before applying them. Recipes should create or group stage layers for rollback."
+    },
+    {
+      "name": "ps_validate_selection_recipe",
+      "title": "Validate Selection Recipe",
+      "description": "Validate a candidate-based selection/mask recipe, including hard-selection vs soft-alpha bus rules and review requirements.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/selection-recipe/validate"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["selection_recipe"],
+        "properties": {
+          "selection_recipe": { "type": "object" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Complex local edits must trial and review candidate masks before lowering them to ps_make_selection, ps_apply_mask_to_layer, ps_apply_plan, or ps_apply_operation_recipe."
+    },
+    {
+      "name": "ps_apply_operation_recipe",
+      "title": "Apply Operation Recipe",
+      "description": "Execute a validated operation atom recipe in Photoshop through UXP inside one executeAsModal history state.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/operation-recipe/apply"
+      },
+      "job_type": "operation_recipe",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["operation_recipe"],
+        "properties": {
+          "operation_recipe": { "type": "object" },
+          "dry_run": { "type": "boolean", "default": false },
+          "wait": { "type": "boolean", "default": true },
+          "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 300000, "default": 120000 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": true,
+        "returns_images": false
+      },
+      "notes": "This is the default executor for open-ended layer stacks such as blur blends, glow layers, grouped effects, and masks. The recipe must be Codex-planned, not selected from a fixed preset."
+    },
+    {
+      "name": "ps_retouch_spot_heal_points",
+      "title": "Retouch Spot Heal Points",
+      "description": "Non-destructively remove Codex-reviewed blemish points by duplicating a source layer and running Photoshop content-aware fill over soft elliptical point selections.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/retouch/spot-heal-points"
+      },
+      "job_type": "operation_recipe",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["points"],
+        "properties": {
+          "source_layer_id": { "description": "Optional source pixel layer id. Defaults to active layer." },
+          "name": { "type": "string", "description": "Name for the duplicated retouch layer." },
+          "points": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 80,
+            "items": {
+              "type": "object",
+              "required": ["x", "y"],
+              "properties": {
+                "x": { "type": "number" },
+                "y": { "type": "number" },
+                "radius": { "type": "number", "minimum": 1, "maximum": 500 },
+                "width": { "type": "number", "minimum": 1, "maximum": 1000 },
+                "height": { "type": "number", "minimum": 1, "maximum": 1000 },
+                "label": { "type": "string" }
+              }
+            }
+          },
+          "feather": { "type": "number", "minimum": 0, "maximum": 200, "default": 2 },
+          "expand": { "type": "number", "minimum": 0, "maximum": 200, "default": 0 },
+          "duplicate_source": { "type": "boolean", "default": true },
+          "rasterize_duplicate": { "type": "boolean", "default": true },
+          "review_regions": { "type": "array" },
+          "wait": { "type": "boolean", "default": true },
+          "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 300000, "default": 120000 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": true,
+        "returns_images": false
+      },
+      "notes": "Use after Codex reviews a local crop and identifies blemish coordinates in document pixels. The tool creates a separate retouch layer; if the result is bad, delete or hide that layer/stage rather than touching the original."
+    },
+    {
+      "name": "ps_retouch_content_aware_fill_selection",
+      "title": "Retouch Content-Aware Fill Selection",
+      "description": "Non-destructively run Photoshop content-aware fill on the current active selection, usually after a bbox/polygon/color/landmark mask has been reviewed.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/retouch/content-aware-fill-selection"
+      },
+      "job_type": "operation_recipe",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "source_layer_id": { "description": "Optional source pixel layer id. Defaults to active layer." },
+          "target_layer_id": { "description": "Optional target layer id when duplicate_source=false." },
+          "name": { "type": "string" },
+          "feather": { "type": "number", "minimum": 0, "maximum": 200, "default": 0 },
+          "expand": { "type": "number", "minimum": 0, "maximum": 200, "default": 0 },
+          "duplicate_source": { "type": "boolean", "default": true },
+          "rasterize_duplicate": { "type": "boolean", "default": true },
+          "review_regions": { "type": "array" },
+          "wait": { "type": "boolean", "default": true },
+          "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 300000, "default": 120000 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": true,
+        "returns_images": false
+      },
+      "notes": "Requires an active Photoshop selection. Use for larger dust spots, scratches, or manually reviewed polygons/bboxes; small face blemishes are usually better handled by ps_retouch_spot_heal_points."
+    },
+    {
+      "name": "ps_create_region_artifact",
+      "title": "Create Region Artifact",
+      "description": "Normalize face-landmarker, SAM/HQ-SAM alpha masks, polygons, bboxes, landmarks, or manual points into a unified region_artifact with multiple representations.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/region-artifacts/create"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "source_result": { "type": "object" },
+          "region_artifact": { "type": "object" },
+          "region_id": { "type": "string" },
+          "label": { "type": "string" },
+          "source": { "type": "string" },
+          "alpha_mask": {},
+          "selection_mask": { "type": "object" },
+          "bbox": { "type": "object" },
+          "points": { "type": "array" },
+          "polygon": { "type": "array" },
+          "landmarks": { "type": "array" },
+          "extract_polygon": { "type": "boolean", "default": false },
+          "max_points": { "type": "integer", "minimum": 8, "maximum": 256, "default": 96 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "This is the bridge from region understanding to Photoshop expressions. It does not execute selection or edits; it creates a reusable region_artifact that can lower to alpha mask, polygon lasso, or path representation."
+    },
+    {
+      "name": "ps_extract_region_contour",
+      "title": "Extract Region Contour",
+      "description": "Extract an approximate polygon contour and bezier path representation from a full-document alpha mask PNG.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/region-artifacts/extract-contour"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "alpha_mask": {},
+          "selection_mask": { "type": "object" },
+          "asset_path": { "type": "string" },
+          "threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5 },
+          "max_points": { "type": "integer", "minimum": 8, "maximum": 256, "default": 96 },
+          "path_smooth": { "type": "number", "minimum": 0, "maximum": 1, "default": 0 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use when a soft alpha mask needs to be reused as polygon lasso or future pen/path input. The contour is an approximation for geometric operations; keep alpha masks for high-quality soft-edge edits."
+    },
+    {
+      "name": "ps_lower_region_to_selection_recipe",
+      "title": "Lower Region To Selection Recipe",
+      "description": "Lower a region_artifact into an executable selection_recipe using alpha_mask, polygon, or bbox representation.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/region-artifacts/lower-selection"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "region_artifact": { "type": "object" },
+          "artifact": { "type": "object" },
+          "prefer": { "type": "string", "enum": ["alpha_mask", "polygon", "bbox"] },
+          "workflow_id": { "type": "string" },
+          "stage_id": { "type": "string" },
+          "review_regions": { "type": "array" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "The returned selection_recipe should still be validated and applied with ps_apply_selection_recipe. Prefer alpha_mask for soft-edge edits; prefer polygon for lasso/marching-ants confirmation."
+    },
+    {
+      "name": "ps_lower_region_to_path",
+      "title": "Lower Region To Pen Path",
+      "description": "Lower a region_artifact into a bezier path/path_recipe representation for future Photoshop pen/work-path, vector-mask, stroke, or path-text tools.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/region-artifacts/lower-path"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "region_artifact": { "type": "object" },
+          "artifact": { "type": "object" },
+          "path_id": { "type": "string" },
+          "path_kind": { "type": "string", "default": "work_path" },
+          "closed": { "type": "boolean", "default": true },
+          "smooth": { "type": "number", "minimum": 0, "maximum": 1, "default": 0 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "First version outputs path data only. It is the stable bridge from alpha/landmark/polygon regions to pen-path planning; native Photoshop path creation will be bound to a path atom later."
+    },
+    {
+      "name": "ps_apply_selection_recipe",
+      "title": "Apply Selection Recipe",
+      "description": "Execute a validated selection/mask recipe. Hard-selection recipes run in UXP; soft-alpha recipes are composited in the backend into one alpha mask.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/selection-recipe/apply"
+      },
+      "job_type": "selection_recipe",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["selection_recipe"],
+        "properties": {
+          "selection_recipe": { "type": "object" },
+          "dry_run": { "type": "boolean", "default": false },
+          "wait": { "type": "boolean", "default": true },
+          "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 300000, "default": 120000 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": true
+      },
+      "notes": "Use in mask_preparation. Hard recipes leave a current selection and save a final alpha channel. Soft recipes return a single alpha_mask selection_mask for downstream tools."
+    },
+    {
+      "name": "ps_review_selection_recipe",
+      "title": "Review Selection Recipe",
+      "description": "Return review guidance that maps candidate mask issues back to selection recipe candidate ids and atom ids.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/selection-recipe/review"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["selection_recipe"],
+        "properties": {
+          "selection_recipe": { "type": "object" },
+          "review_assets": { "type": "object" },
+          "observations": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use after overlay/crop review to decide whether to accept, tune, combine, or retry a mask candidate."
+    },
+    {
+      "name": "ps_apply_mask_to_layer",
+      "title": "Apply Mask To Layer",
+      "description": "Apply a current selection, composite selection, or full-document alpha mask as a layer mask on a target layer.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/apply-mask-to-layer"
+      },
+      "job_type": "apply_mask_to_layer",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["selection_mask"],
+        "properties": {
+          "layer_id": { "type": ["integer", "string"] },
+          "target_layer_id": { "type": ["integer", "string"] },
+          "selection_mask": { "type": "object" },
+          "wait": { "type": "boolean", "default": true },
+          "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 300000, "default": 60000 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Prefer this for soft alpha masks so the edge is preserved as a layer mask. ps_make_selection remains useful for marching-ants confirmation."
+    },
+    {
+      "name": "ps_create_selection_strategy",
+      "title": "Create Selection Strategy",
+      "description": "Create an abstract, flexible selection/mask strategy with multiple equal-status candidate methods, refinement ideas, and review criteria before trying or applying a mask.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/selections/create-strategy"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["target"],
+        "properties": {
+          "strategy_id": { "type": "string" },
+          "target": { "type": "string", "description": "Target region or object to select, such as sky, blackboard, building, face, clothing, background, or color/tone range." },
+          "visual_brief": { "type": "string" },
+          "scene_tags": { "type": "array", "items": { "type": "string" } },
+          "protected_regions": { "type": "array", "items": { "type": "object" } },
+          "research_findings": {
+            "type": "array",
+            "items": { "type": "object" },
+            "description": "Concise findings from web search/RAG about which Photoshop selection methods may work better for this target."
+          },
+          "review_regions": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use before complex mask_preparation stages. The output is abstract strategy, not executable selection_mask DSL. Do not emit concrete selection_mask.source values at this stage; Codex must inspect previews, use web/RAG findings, try plausible candidates, compare overlays/crops, then lower the winning candidate into a concrete mask only for ps_make_selection or ps_apply_plan."
+    },
+    {
+      "name": "ps_validate_selection_strategy",
+      "title": "Validate Selection Strategy",
+      "description": "Validate that a selection strategy avoids fixed routing, contains candidate methods, review outputs, comparison policy, and add/subtract/intersect refinement rules.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/selections/validate-strategy"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["selection_strategy"],
+        "properties": {
+          "selection_strategy": { "type": "object" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Complex selection workflows should validate this before running tool trials. Strategy candidates must stay abstract and must not contain executable selection_mask payloads. Alpha masks remain soft and should be composited in backend; Photoshop boolean add/subtract/intersect is for native/bbox/polygon/current selections after a candidate is lowered."
+    },
+    {
+      "name": "ps_create_workflow_plan",
+      "title": "Create Staged Workflow Plan",
+      "description": "Create a staged workflow skeleton for complex Photoshop tasks before any execution.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/workflows/create-plan"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "goal": { "type": "string" },
+          "visual_brief": { "type": "string" },
+          "stage_ids": { "type": "array", "items": { "type": "string" } },
+          "review_regions": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Codex remains the strategy owner; this creates the structured workflow container. Stage route examples are skeletons, not fixed templates. For route=photo_effect, named looks such as white-soft, bloom, halation, film mist, or Tyndall light belong in effect_intent only and must be lowered into concrete operation_recipe/selection_recipe/layer_recipe/plan payloads before execution."
+    },
+    {
+      "name": "ps_validate_workflow_plan",
+      "title": "Validate Staged Workflow Plan",
+      "description": "Validate that each workflow stage has objective, expected result, review policy, pass criteria, and rollback target.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/workflows/validate-plan"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["workflow_plan"],
+        "properties": {
+          "workflow_plan": { "type": "object" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Complex edit workflows should pass this before stage execution. route=photo_effect stages may contain effect_intent, but effect_intent is strategy-only; executable stages must contain concrete steps/ops through operation_recipe, layer_recipe, selection_recipe, or a validated ps-agent/v1 plan."
+    },
+    {
+      "name": "ps_apply_workflow_stage",
+      "title": "Apply One Workflow Stage",
+      "description": "Apply exactly one stage from a staged workflow plan and return stage tracking metadata.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/workflows/apply-stage"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["workflow_plan", "stage_id"],
+        "properties": {
+          "workflow_plan": { "type": "object" },
+          "stage_id": { "type": "string" },
+          "dry_run": { "type": "boolean", "default": false },
+          "wait": { "type": "boolean", "default": true },
+          "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 300000, "default": 120000 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": true,
+        "returns_images": true
+      },
+      "notes": "Never use this to run a whole complex edit at once. Execute and review one stage at a time. photo_effect is a stage route, not a Photoshop operation; this tool only applies a lowered concrete recipe or plan."
+    },
+    {
+      "name": "ps_review_workflow_stage",
+      "title": "Review Workflow Stage",
+      "description": "Return stage-level review criteria and feedback mapping for a completed workflow stage.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/workflows/review-stage"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["workflow_plan", "stage_id"],
+        "properties": {
+          "workflow_plan": { "type": "object" },
+          "stage_id": { "type": "string" },
+          "preview_assets": { "type": "object" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Feedback must map back to workflow_id -> stage_id -> step_id/primitive_id/capability_id."
+    },
+    {
+      "name": "ps_finalize_workflow_review",
+      "title": "Finalize Workflow Review",
+      "description": "Return final review checklist for cross-stage side effects and acceptance.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/workflows/finalize-review"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["workflow_plan"],
+        "properties": {
+          "workflow_plan": { "type": "object" },
+          "preview_assets": { "type": "object" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use after all accepted stages are complete."
+    },
+    {
+      "name": "ps_delete_workflow_stage",
+      "title": "Delete Workflow Stage Group",
+      "description": "Delete one specific staged workflow layer group without removing other stages.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/workflows/delete-stage"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workflow_id": { "type": "string" },
+          "stage_id": { "type": "string" },
+          "job_id": { "type": "string" },
+          "group_name": { "type": "string" },
+          "dry_run": { "type": "boolean", "default": false },
+          "wait": { "type": "boolean", "default": true },
+          "timeout_ms": { "type": "integer", "minimum": 1000, "maximum": 300000, "default": 60000 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": true,
+        "returns_images": false
+      },
+      "notes": "Use group_name from ps_apply_workflow_stage result when available. Otherwise provide workflow_id, stage_id, and stage apply job_id."
+    },
+    {
+      "name": "ps_analyze_image_metrics",
+      "title": "Analyze Image Metrics",
+      "description": "Read-only deterministic image observation: tone/color percentiles, compact luma/saturation/value/hue/RGB histograms, Lab, HSV hue bands, dominant colors, and risk flags for Codex planning.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/analyze-image-metrics"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "asset_path"
+        ],
+        "properties": {
+          "asset_path": {
+            "type": "string",
+            "description": "Absolute local image path to analyze."
+          },
+          "regions": {
+            "type": "array",
+            "default": [],
+            "description": "Optional bbox regions in original image pixels.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "sample_max_side": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 4096,
+            "default": 1200
+          },
+          "scene_tags": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Read-only deterministic observation layer. It must not generate Photoshop plans or parameter presets; Codex uses the metrics and histograms as evidence while writing its own staged plan."
+    },
+    {
+      "name": "ps_retrieve_style_guidance",
+      "title": "Retrieve Style Guidance",
+      "description": "Retrieve local RAG style cards for a user goal, Codex visual brief, scene tags, and optional image metrics.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/retrieve-style-guidance"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_goal": {
+            "type": "string"
+          },
+          "visual_brief": {
+            "type": "string"
+          },
+          "scene_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "target_metrics": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "reference_metrics": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "default": 3
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "RAG guidance only provides style constraints, aliases, mask guidance, selected_reason, and failure traps; it must not directly generate Photoshop descriptors. Direct visual grading should use this as guidance only."
+    },
+    {
+      "name": "ps_score_grade_preview",
+      "title": "Score Grade Preview",
+      "description": "Experimental helper that scores before/after/reference previews using deterministic metrics for reference similarity, subject protection, tone safety, color consistency, and black/white risk.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/score-grade-preview"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "before_metrics": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "after_metrics": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "reference_metrics": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "before_asset_path": {
+            "type": "string"
+          },
+          "after_asset_path": {
+            "type": "string"
+          },
+          "reference_asset_path": {
+            "type": "string"
+          },
+          "sample_max_side": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 4096,
+            "default": 1000
+          },
+          "pass_threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "default": 65
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Experimental. Use only as an auxiliary signal alongside Codex visual review; do not let it decide whether a broad style grade is acceptable."
+    },
+    {
+      "name": "ps_list_effect_primitives",
+      "title": "List Effect Primitives",
+      "description": "List the open-ended composable effect primitive library used to build layer recipes. These are visual mechanisms, not fixed presets.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/effect-primitives/list"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "include_details": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use before open-ended effect planning to inspect available visual mechanisms, safe ranges, and failure modes."
+    },
+    {
+      "name": "ps_retrieve_effect_primitives",
+      "title": "Retrieve Effect Primitives",
+      "description": "Retrieve candidate effect primitives for a user goal, visual brief, scene tags, and avoid list.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/effect-primitives/retrieve"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_goal": {
+            "type": "string"
+          },
+          "visual_brief": {
+            "type": "string"
+          },
+          "scene_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "avoid": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 24,
+            "default": 8
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Returns primitives, selection reasons, protection hints, review regions, and failure modes. It should not be treated as a preset matcher."
+    },
+    {
+      "name": "ps_generate_layer_recipe",
+      "title": "Generate Layer Recipe",
+      "description": "Generate an open-ended layer recipe from selected effect primitives or by retrieving primitives from the user goal and visual brief.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/layer-recipe/generate"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "user_goal": {
+            "type": "string"
+          },
+          "visual_brief": {
+            "type": "string"
+          },
+          "primitive_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selected_primitives": {
+            "type": "array",
+            "items": {
+              "type": [
+                "object",
+                "string"
+              ]
+            }
+          },
+          "scene_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "avoid": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "strength": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "review_regions": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "v1 lowers primitives to already-supported ps_apply_plan operations while preserving primitive ids and failure modes for review."
+    },
+    {
+      "name": "ps_validate_layer_recipe",
+      "title": "Validate Layer Recipe",
+      "description": "Validate that a layer recipe uses supported primitive-backed operations and safe layer settings.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/layer-recipe/validate"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "layer_recipe"
+        ],
+        "properties": {
+          "layer_recipe": {
+            "type": "object"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Also validates the lowered ps_apply_plan when possible."
+    },
+    {
+      "name": "ps_apply_layer_recipe",
+      "title": "Apply Layer Recipe",
+      "description": "Apply a validated primitive-backed layer recipe by lowering it to the existing non-destructive ps_apply_plan execution path.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/layer-recipe/apply"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "layer_recipe"
+        ],
+        "properties": {
+          "layer_recipe": {
+            "type": "object"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 120000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": true
+      },
+      "notes": "v1 does not yet create stamp/blur/glare pixel layers; it uses stable adjustment-layer and Camera Raw operations while preserving primitive metadata."
+    },
+    {
+      "name": "ps_review_layer_recipe",
+      "title": "Review Layer Recipe",
+      "description": "Return primitive-level review guidance, failure modes, and feedback mapping for a layer recipe.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/layer-recipe/review"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "layer_recipe"
+        ],
+        "properties": {
+          "layer_recipe": {
+            "type": "object"
+          },
+          "preview_assets": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use after preview export so visual issues can be mapped back to primitive ids instead of vague whole-image feedback."
+    },
+    {
+      "name": "ps_get_state",
+      "title": "Get Photoshop Document State",
+      "description": "Queue a UXP job that reads the active Photoshop document, dimensions, mode, active layer, revision, and optionally layer metadata.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/state"
+      },
+      "job_type": "get_state",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "include_layers": {
+            "type": "boolean",
+            "default": true
+          },
+          "include_history": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "This is the first tool Codex should call before generating an edit plan."
+    },
+    {
+      "name": "ps_export_preview",
+      "title": "Export Full Preview",
+      "description": "Queue a UXP job that exports a scaled full-document preview for global visual evaluation.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/export-preview"
+      },
+      "job_type": "export_preview",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ],
+            "default": "png"
+          },
+          "max_side": {
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 4096,
+            "default": 1600
+          },
+          "include_document_state": {
+            "type": "boolean",
+            "default": true
+          },
+          "return_before_after": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": true
+      },
+      "notes": "Preview coordinates must report scale_factor so Codex can map visible pixels back to document pixels."
+    },
+    {
+      "name": "ps_export_regions",
+      "title": "Export Local Regions",
+      "description": "Queue a UXP job that exports one or more bbox crops in document-pixel coordinates for local evaluation.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/export-regions"
+      },
+      "job_type": "export_regions",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "regions"
+        ],
+        "properties": {
+          "regions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 12,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "type",
+                "bbox"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "bbox"
+                  ]
+                },
+                "bbox": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "x",
+                    "y",
+                    "width",
+                    "height"
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "width": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "height": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  }
+                },
+                "purpose": {
+                  "type": "string"
+                },
+                "padding": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 512,
+                  "default": 0
+                }
+              }
+            }
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ],
+            "default": "jpeg"
+          },
+          "max_side": {
+            "type": "integer",
+            "minimum": 128,
+            "maximum": 2048,
+            "default": 1536,
+            "description": "Target maximum output side for each region crop. Crops are scaled up or down so the longest side reaches this value."
+          },
+          "upscale_small_regions": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true, crops smaller than max_side are upscaled for easier inspection and manipulation."
+          },
+          "quality": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "default": 8,
+            "description": "JPEG quality. Ignored for PNG."
+          },
+          "return_before_after": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": true
+      },
+      "notes": "All bboxes use top-left origin and original document pixels."
+    },
+    {
+      "name": "ps_generate_face_selection",
+      "title": "Generate Face Polygon Selection",
+      "description": "Generate ps-agent/v1 polygon selection masks for face parts from a local face crop using the optional local MediaPipe Face Landmarker model.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/face-selection"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "asset_path",
+          "document_bbox",
+          "scale_factor",
+          "parts"
+        ],
+        "properties": {
+          "asset_path": {
+            "type": "string",
+            "description": "Absolute local path of a face crop asset previously exported by ps_export_regions."
+          },
+          "document_bbox": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "x",
+              "y",
+              "width",
+              "height"
+            ],
+            "properties": {
+              "x": {
+                "type": "number",
+                "minimum": 0
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0
+              },
+              "width": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "height": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            }
+          },
+          "scale_factor": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Scale factor from document pixels to the exported crop pixels."
+          },
+          "parts": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "enum": [
+                "left_eye",
+                "right_eye",
+                "both_eyes",
+                "lips_outer",
+                "face_oval",
+                "left_cheek",
+                "right_cheek"
+              ]
+            }
+          },
+          "face_index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional face index. If omitted, the largest detected face is used."
+          },
+          "max_faces": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "default": 4
+          },
+          "expand_px": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 256,
+            "default": 0
+          },
+          "smooth": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 0.75,
+            "default": 0
+          },
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 12
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Face-region selections should prefer this tool. Codex-generated polygon coordinates are primarily for non-face regions and only a fallback for face when the local model is unavailable."
+    },
+    {
+      "name": "ps_generate_sam_mask",
+      "title": "Generate SAM Alpha Mask",
+      "description": "Generate a full-document alpha mask PNG from an exported preview/crop using the optional local SAM 2.1 Base+ worker.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/sam-mask"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "asset_path",
+          "document_size",
+          "document_bbox",
+          "scale_factor",
+          "prompt"
+        ],
+        "properties": {
+          "asset_path": {
+            "type": "string",
+            "description": "Absolute local path of an exported preview or crop asset under the workspace."
+          },
+          "document_size": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "width",
+              "height"
+            ],
+            "properties": {
+              "width": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "height": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            }
+          },
+          "document_bbox": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "x",
+              "y",
+              "width",
+              "height"
+            ],
+            "properties": {
+              "x": {
+                "type": "number",
+                "minimum": 0
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0
+              },
+              "width": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "height": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "description": "The asset crop bbox in original Photoshop document pixels. For a full preview, use x=0,y=0,width=document width,height=document height."
+          },
+          "scale_factor": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Scale factor from document pixels to asset pixels."
+          },
+          "prompt": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "coord_space": {
+                "type": "string",
+                "enum": [
+                  "document",
+                  "asset"
+                ],
+                "default": "document"
+              },
+              "bbox": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ],
+                "properties": {
+                  "x": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "width": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "height": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                }
+              },
+              "positive_points": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "x",
+                    "y"
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              },
+              "negative_points": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "x",
+                    "y"
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "bbox"
+                ]
+              },
+              {
+                "required": [
+                  "positive_points"
+                ]
+              }
+            ],
+            "description": "First version supports bbox and positive/negative point prompts only. No text grounding."
+          },
+          "label": {
+            "type": "string",
+            "default": "sam_alpha_mask"
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.5
+          },
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 0
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "show_marching_ants": {
+            "type": "boolean",
+            "default": false
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 120000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": true
+      },
+      "notes": "Requires the optional SAM worker: python backend/cli.py sam start. Output selection_mask.source=alpha_mask should be used as a replace mask in ps_make_selection or ps_apply_plan. For add/subtract/intersect behavior, generate a new composited alpha mask rather than combining soft masks in Photoshop."
+    },
+    {
+      "name": "ps_detect_grounding_boxes",
+      "title": "Detect Grounding Boxes",
+      "description": "Run local Grounding DINO text-guided detection on an exported preview or crop and return candidate boxes plus an overlay preview.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/grounding/detect-boxes"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "asset_path",
+          "document_size",
+          "document_bbox",
+          "scale_factor",
+          "queries"
+        ],
+        "properties": {
+          "asset_path": {
+            "type": "string"
+          },
+          "document_size": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "width",
+              "height"
+            ],
+            "properties": {
+              "width": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "height": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            }
+          },
+          "document_bbox": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "x",
+              "y",
+              "width",
+              "height"
+            ],
+            "properties": {
+              "x": {
+                "type": "number",
+                "minimum": 0
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0
+              },
+              "width": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "height": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            }
+          },
+          "scale_factor": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "queries": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "prompt_en"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "prompt_en": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "prompt_zh": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "include",
+                    "exclude"
+                  ],
+                  "default": "include"
+                }
+              }
+            }
+          },
+          "box_threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.35
+          },
+          "text_threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.25
+          },
+          "max_candidates": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 256,
+            "default": 32
+          },
+          "dedupe_iou": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.85
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 120000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": true
+      },
+      "notes": "Requires the optional Grounding DINO + HQ-SAM worker: python backend/cli.py grounding start. Use this before segmentation when the target is a semantic object such as building, product, sign, flower, blackboard, or clothing."
+    },
+    {
+      "name": "ps_generate_hqsam_mask",
+      "title": "Generate HQ-SAM Alpha Mask",
+      "description": "Generate a full-document alpha mask PNG from an exported preview or crop using the optional local HQ-SAM worker.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/grounding/hqsam-mask"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "asset_path",
+          "document_size",
+          "document_bbox",
+          "scale_factor",
+          "prompt"
+        ],
+        "properties": {
+          "asset_path": {
+            "type": "string"
+          },
+          "document_size": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "width",
+              "height"
+            ],
+            "properties": {
+              "width": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "height": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            }
+          },
+          "document_bbox": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "x",
+              "y",
+              "width",
+              "height"
+            ],
+            "properties": {
+              "x": {
+                "type": "number",
+                "minimum": 0
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0
+              },
+              "width": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "height": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            }
+          },
+          "scale_factor": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "prompt": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "coord_space": {
+                "type": "string",
+                "enum": [
+                  "document",
+                  "asset"
+                ],
+                "default": "document"
+              },
+              "bbox": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ],
+                "properties": {
+                  "x": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "width": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "height": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                }
+              },
+              "positive_points": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "x",
+                    "y"
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              },
+              "negative_points": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "x",
+                    "y"
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "bbox"
+                ]
+              },
+              {
+                "required": [
+                  "positive_points"
+                ]
+              }
+            ]
+          },
+          "label": {
+            "type": "string",
+            "default": "hqsam_alpha_mask"
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.5
+          },
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 0
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "show_marching_ants": {
+            "type": "boolean",
+            "default": false
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 120000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": true
+      },
+      "notes": "Requires the optional Grounding DINO + HQ-SAM worker: python backend/cli.py grounding start. Output selection_mask.source=alpha_mask can be consumed directly by ps_make_selection or ps_apply_plan."
+    },
+    {
+      "name": "ps_generate_grounded_hq_mask",
+      "title": "Generate Grounded HQ Mask",
+      "description": "Run Grounding DINO detection and HQ-SAM refinement, then merge the instance masks into one full-document alpha mask PNG.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/grounding/grounded-mask"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "asset_path",
+          "document_size",
+          "document_bbox",
+          "scale_factor",
+          "include_queries"
+        ],
+        "properties": {
+          "asset_path": {
+            "type": "string"
+          },
+          "document_size": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "width",
+              "height"
+            ],
+            "properties": {
+              "width": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "height": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            }
+          },
+          "document_bbox": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "x",
+              "y",
+              "width",
+              "height"
+            ],
+            "properties": {
+              "x": {
+                "type": "number",
+                "minimum": 0
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0
+              },
+              "width": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "height": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            }
+          },
+          "scale_factor": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "include_queries": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "prompt_en"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "prompt_en": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "prompt_zh": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "include"
+                  ],
+                  "default": "include"
+                }
+              }
+            }
+          },
+          "exclude_queries": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "prompt_en"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "prompt_en": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "prompt_zh": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "exclude"
+                  ],
+                  "default": "exclude"
+                }
+              }
+            }
+          },
+          "selection_policy": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "segmentation_prompt_policy": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "merge_mode": {
+            "type": "string",
+            "enum": [
+              "union",
+              "subtract_excludes",
+              "intersect"
+            ]
+          },
+          "box_threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.35
+          },
+          "text_threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.25
+          },
+          "max_candidates": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 256,
+            "default": 32
+          },
+          "dedupe_iou": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.85
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.5
+          },
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 0
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "show_marching_ants": {
+            "type": "boolean",
+            "default": false
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 180000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": true
+      },
+      "notes": "Default route for semantic non-face local masks such as buildings, products, signs, blackboards, flowers, clothing, and background objects. Soft add/subtract/intersect behavior is composed in the backend before Photoshop consumes the final alpha mask."
+    },
+    {
+      "name": "ps_make_selection",
+      "title": "Make Active Photoshop Selection",
+      "description": "Queue a selection_mask job that creates the active Photoshop selection without creating layers or applying edits.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/make-selection"
+      },
+      "job_type": "make_selection",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "selection_mask"
+        ],
+        "properties": {
+          "selection_mask": {
+            "type": "object",
+            "description": "A ps-agent/v1 selection_mask object. Supports bbox, polygon, alpha_mask, current_selection, select_subject, select_sky, color_range, and composite sources."
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use this when the user asks to establish or refine an active Photoshop selection. It leaves the selection active for manual edits or later current_selection-based tools."
+    },
+    {
+      "name": "ps_select_subject",
+      "title": "Photoshop Select Subject",
+      "description": "Use Photoshop's native Select Subject command to create an active selection.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/select-subject"
+      },
+      "job_type": "selection_command",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 0
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Photoshop native AI selection; best for subject/product/person whole-object selection, not clothing-specific parsing."
+    },
+    {
+      "name": "ps_select_sky",
+      "title": "Photoshop Select Sky",
+      "description": "Use Photoshop's native Select Sky command to create an active sky selection.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/select-sky"
+      },
+      "job_type": "selection_command",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 0
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Photoshop native sky selection for landscape and outdoor images."
+    },
+    {
+      "name": "ps_select_color_range",
+      "title": "Photoshop Color Range Selection",
+      "description": "Create an active selection with Photoshop's native Color Range command using sampled RGB or a named color preset.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/select-color-range"
+      },
+      "job_type": "selection_command",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "color": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "r": { "type": "number", "minimum": 0, "maximum": 255 },
+              "g": { "type": "number", "minimum": 0, "maximum": 255 },
+              "b": { "type": "number", "minimum": 0, "maximum": 255 }
+            }
+          },
+          "preset": {
+            "type": "string",
+            "enum": ["sampled", "reds", "yellows", "greens", "cyans", "blues", "magentas", "skin_tones", "highlights", "midtones", "shadows"]
+          },
+          "fuzziness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 200,
+            "default": 40
+          },
+          "localized_color_clusters": {
+            "type": "boolean",
+            "default": false
+          },
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 0
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Descriptor may need calibration on some Photoshop builds. If rejected, capture Action.json for Color Range."
+    },
+    {
+      "name": "ps_extract_tonal_range",
+      "title": "Extract Tonal Range Selection",
+      "description": "Create an active Photoshop selection from highlights, midtones, or shadows without hand-writing a Color Range preset.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/extract-tonal-range"
+      },
+      "job_type": "selection_command",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tonal_range"],
+        "properties": {
+          "tonal_range": {
+            "type": "string",
+            "enum": ["highlights", "midtones", "shadows"]
+          },
+          "fuzziness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 200,
+            "default": 40
+          },
+          "localized_color_clusters": {
+            "type": "boolean",
+            "default": false
+          },
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 0
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "A higher-level wrapper over Color Range for the three most common tonal extractions: highlights, midtones, and shadows."
+    },
+    {
+      "name": "ps_select_highlights",
+      "title": "Select Highlights",
+      "description": "Create an active selection from Photoshop highlights.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/select-highlights"
+      },
+      "job_type": "selection_command",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fuzziness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 200,
+            "default": 40
+          },
+          "localized_color_clusters": {
+            "type": "boolean",
+            "default": false
+          },
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 0
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Convenience tonal extraction tool for bloom, white-soft, glare, and highlight protection setups."
+    },
+    {
+      "name": "ps_select_midtones",
+      "title": "Select Midtones",
+      "description": "Create an active selection from Photoshop midtones.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/select-midtones"
+      },
+      "job_type": "selection_command",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fuzziness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 200,
+            "default": 40
+          },
+          "localized_color_clusters": {
+            "type": "boolean",
+            "default": false
+          },
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 0
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Useful when the effect should live in the body of the image instead of only extreme highlights or shadows."
+    },
+    {
+      "name": "ps_select_shadows",
+      "title": "Select Shadows",
+      "description": "Create an active selection from Photoshop shadows.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/select-shadows"
+      },
+      "job_type": "selection_command",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fuzziness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 200,
+            "default": 40
+          },
+          "localized_color_clusters": {
+            "type": "boolean",
+            "default": false
+          },
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 0
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Convenience tonal extraction tool for haze, matte, fog, lifted-black, and shadow atmosphere control."
+    },
+    {
+      "name": "ps_build_luminosity_mask",
+      "title": "Build Luminosity Mask Channel",
+      "description": "Create a highlights, midtones, or shadows selection and immediately save it into a named Photoshop alpha channel.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/build-luminosity-mask"
+      },
+      "job_type": "selection_command",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tonal_range", "channel_name"],
+        "properties": {
+          "tonal_range": {
+            "type": "string",
+            "enum": ["highlights", "midtones", "shadows"]
+          },
+          "channel_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "fuzziness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 200,
+            "default": 40
+          },
+          "localized_color_clusters": {
+            "type": "boolean",
+            "default": false
+          },
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 0
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "modify": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["operation", "amount"],
+              "properties": {
+                "operation": {
+                  "type": "string",
+                  "enum": ["feather", "expand", "contract", "smooth", "border"]
+                },
+                "amount": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 500
+                }
+              }
+            }
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Sequential composite tool: tonal range selection -> optional selection modify steps -> save selection to alpha channel. Requires wait=true and a live UXP connection."
+    },
+    {
+      "name": "ps_select_focus_area",
+      "title": "Photoshop Focus Area Selection",
+      "description": "Attempt Photoshop's native Focus Area command to create a selection from in-focus regions.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/select-focus-area"
+      },
+      "job_type": "selection_command",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "in_focus_range": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10,
+            "default": 4
+          },
+          "noise_level": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10,
+            "default": 1
+          },
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500,
+            "default": 0
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Experimental descriptor wrapper. Useful for shallow depth-of-field photos after descriptor calibration."
+    },
+    {
+      "name": "ps_modify_selection",
+      "title": "Modify Active Photoshop Selection",
+      "description": "Apply Photoshop selection modification commands: feather, expand, contract, smooth, or border.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/modify-selection"
+      },
+      "job_type": "selection_command",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operation", "amount"],
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": ["feather", "expand", "contract", "smooth", "border"]
+          },
+          "amount": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Requires an active selection. Good for cleaning model-generated or Photoshop-generated selections before applying masks."
+    },
+    {
+      "name": "ps_save_selection_channel",
+      "title": "Save Selection To Alpha Channel",
+      "description": "Save the current active Photoshop selection into a named alpha channel.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/save-selection-channel"
+      },
+      "job_type": "selection_command",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channel_name"],
+        "properties": {
+          "channel_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use after a good selection is established so it can be reloaded later."
+    },
+    {
+      "name": "ps_load_selection_channel",
+      "title": "Load Selection From Alpha Channel",
+      "description": "Load a named alpha channel as the active Photoshop selection.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/load-selection-channel"
+      },
+      "job_type": "selection_command",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channel_name"],
+        "properties": {
+          "channel_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Use to restore a named saved selection before applying an edit plan to current_selection."
+    },
+    {
+      "name": "ps_selection_command",
+      "title": "Run Photoshop Selection Command",
+      "description": "Run a whitelisted Photoshop native selection command, including select_all, deselect, inverse, select_subject, select_sky, color_range, focus_area, modify, save_selection, and load_selection.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/selection-command"
+      },
+      "job_type": "selection_command",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action"],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["select_subject", "select_sky", "select_all", "deselect", "inverse", "color_range", "focus_area", "modify", "save_selection", "load_selection"]
+          },
+          "operation": {
+            "type": "string",
+            "enum": ["feather", "expand", "contract", "smooth", "border"]
+          },
+          "amount": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500
+          },
+          "color": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "r": { "type": "number", "minimum": 0, "maximum": 255 },
+              "g": { "type": "number", "minimum": 0, "maximum": 255 },
+              "b": { "type": "number", "minimum": 0, "maximum": 255 }
+            }
+          },
+          "preset": {
+            "type": "string",
+            "enum": ["sampled", "reds", "yellows", "greens", "cyans", "blues", "magentas", "skin_tones", "highlights", "midtones", "shadows"]
+          },
+          "fuzziness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 200
+          },
+          "localized_color_clusters": {
+            "type": "boolean",
+            "default": false
+          },
+          "in_focus_range": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "noise_level": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "channel_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "feather": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500
+          },
+          "invert": {
+            "type": "boolean",
+            "default": false
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Convenience wrapper for menu-like selection actions. Prefer dedicated tools when available; use this for select_all, deselect, and inverse."
+    },
+    {
+      "name": "ps_validate_plan",
+      "title": "Validate Edit Plan",
+      "description": "Validate a ps-agent/v1 edit plan against backend safety rules without changing Photoshop, including PS 25 composite selection masks and experimental acr_ai_mask targets when explicitly enabled.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/validate-plan"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plan"
+        ],
+        "properties": {
+          "plan": {
+            "type": "object",
+            "description": "A ps-agent/v1 edit plan."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": false
+      },
+      "notes": "Codex must call this before ps_apply_plan. selection_mask supports operation=replace/add/subtract/intersect for bbox, polygon, color_range, select_subject, select_sky, and source=composite ordered items. source=color_range can be used multiple times with different presets/colors/fuzziness thresholds, then refined by subtracting subject/foreground selections. source=alpha_mask is replace-only and preserves soft mask edges from SAM/other mask generators. Global camera_raw_filter is the preferred main color-grading path. Non-destructive adjustment ops include adjust_hue_saturation, adjust_curves, adjust_levels, adjust_selective_color, adjust_gradient_map, and adjust_color_lookup. Experimental acr_ai_mask targets require plan.safety.allow_experimental_acr_masks=true; camera_raw_internal currently reports availability explicitly, while photoshop_selection_fallback works for subject/background/sky."
+    },
+    {
+      "name": "ps_apply_plan",
+      "title": "Apply Edit Plan",
+      "description": "Queue a validated ps-agent/v1 plan for UXP execution in Photoshop using non-destructive adjustment layers including Hue/Saturation, Curves, Levels, Selective Color, Gradient Map, Color Lookup, alpha masks, PS 25 composite selection masks, smart objects, whitelisted Camera Raw smart filters, and gated experimental ACR AI mask targets.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/apply-plan"
+      },
+      "job_type": "apply_plan",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plan"
+        ],
+        "properties": {
+          "plan": {
+            "type": "object",
+            "description": "A ps-agent/v1 edit plan that already passed validation."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": true,
+        "returns_images": true
+      },
+      "notes": "The UXP side executes document mutations inside executeAsModal. selection_mask source=alpha_mask downloads a full-document transparent PNG and loads its transparency as a soft selection before creating the adjustment layer mask. source=bbox/polygon uses PS 25 Selection API SelectionType REPLACE/EXTEND/DIMINISH/INTERSECT; source=color_range/select_subject/select_sky can also participate in composite add/subtract/intersect through temporary alpha-channel loading; source=composite applies ordered replace/add/subtract/intersect items. Use global camera_raw_filter for main color grading. Use adjust_hue_saturation, adjust_curves, adjust_levels, adjust_selective_color, adjust_gradient_map, and adjust_color_lookup for editable Photoshop adjustment layers; all can be constrained by selection_mask targets except camera_raw_filter's global smart-filter path. Experimental acr_ai_mask supports camera_raw_internal capability reporting and a working photoshop_selection_fallback for subject/background/sky."
+    },
+    {
+      "name": "ps_delete_agent_group",
+      "title": "Delete Agent Layer Group",
+      "description": "Delete one specific Codex Agent layer group by the apply job id without using Photoshop history undo.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/delete-agent-group"
+      },
+      "job_type": "delete_agent_group",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "pattern": "^job-[A-Za-z0-9_.:-]{1,120}$",
+            "description": "Apply job id whose group name is exactly Codex Agent - {job_id}."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false
+          },
+          "wait": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 60000
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": true,
+        "returns_images": false
+      },
+      "notes": "Preferred cleanup path for a known agent apply job. The UXP side constructs the fixed group name Codex Agent - {job_id}, verifies it is a layer group, and deletes only that group."
+    },
+    {
+      "name": "ps_undo_last",
+      "title": "Undo Last Agent Edit",
+      "description": "Queue a UXP job that rolls back the latest Codex/agent-created Photoshop edit where possible.",
+      "transport": "http_job_queue",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/undo-last"
+      },
+      "job_type": "undo_last_agent_edit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Optional job id to undo. If omitted, undo the latest agent edit."
+          },
+          "history_name_prefix": {
+            "type": "string",
+            "default": "Codex Agent"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": true,
+        "requires_active_document": true,
+        "requires_user_confirmation": true,
+        "returns_images": false
+      },
+      "notes": "Use ps_delete_agent_group for a known apply job id. Keep this as a fallback only when Photoshop history rollback is explicitly needed."
+    },
+    {
+      "name": "ps_get_job",
+      "title": "Get Job Result",
+      "description": "Read a queued/running/completed job record from the Python backend.",
+      "transport": "direct_http",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/jobs/{job_id}"
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "safety": {
+        "modifies_document": false,
+        "requires_active_document": false,
+        "requires_user_confirmation": false,
+        "returns_images": true
+      },
+      "notes": "Used when ps_apply_plan or export tools run asynchronously."
+    }
+  ]
+}

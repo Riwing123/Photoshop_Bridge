@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <section class="panel">
+    <header class="header">
+      <sp-heading size="S">PS UXP Agent</sp-heading>
+      <div class="actions">
+        <sp-button id="btnCopyStart" size="S">复制启动</sp-button>
+        <sp-button id="btnDiagnostics" size="S">诊断</sp-button>
+        <sp-button id="btnRefresh" size="S">刷新</sp-button>
+      </div>
+    </header>
+
+    <div class="status-row">
+      <span id="backendDot" class="dot disconnected"></span>
+      <div>
+        <div id="backendStatus" class="status-title">Backend Disconnected</div>
+        <div id="backendUrl" class="muted">trying 127.0.0.1 / localhost</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="label">Plugin</div>
+      <div id="pluginStatus">idle</div>
+      <div class="label">Heartbeat</div>
+      <div id="lastHeartbeat">never</div>
+      <div class="label">Queue</div>
+      <div id="queueStatus">pending 0 / running 0</div>
+      <div class="label">Job</div>
+      <div id="jobStatus">none</div>
+    </div>
+
+    <sp-divider size="s"></sp-divider>
+
+    <div class="section-title">Photoshop Document</div>
+    <div id="documentStatus" class="document-box">No document data yet.</div>
+
+    <sp-divider size="s"></sp-divider>
+
+    <div class="section-title">Last Error</div>
+    <div id="lastError" class="error-box">None</div>
+
+    <sp-divider size="s"></sp-divider>
+
+    <div class="section-title">Diagnostics</div>
+    <div id="diagnosticsStatus" class="document-box">No diagnostics yet.</div>
+  </section>
+
+  <script src="main.js"></script>
+</body>
+</html>

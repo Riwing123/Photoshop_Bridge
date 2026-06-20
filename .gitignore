@@ -1,0 +1,34 @@
+# Python
+.venv/
+.venv-sam/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Runtime outputs and logs
+backend/runtime/
+*.log
+*.err
+*.err.log
+
+# Local ML model binaries
+backend/models/*.task
+backend/models/sam2/
+backend/models/grounding_dino/*.pth
+backend/models/sam_hq/*.pth
+backend/models/**/*.pt
+backend/models/**/*.pth
+backend/models/**/*.task
+
+# Node / UXP local dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

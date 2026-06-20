@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "ps-uxp-agent": {
+      "command": "python",
+      "args": [
+        "D:\\Photo_sontrol\\backend\\mcp_server.py"
+      ],
+      "env": {
+        "PS_AGENT_BACKEND_URL": "http://127.0.0.1:17860"
+      }
+    }
+  }
+}

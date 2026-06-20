@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.ps-agent/schemas/ps-agent-job.schema.json",
+  "title": "PS Agent Job",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "job_id",
+    "job_type",
+    "created_at",
+    "timeout_ms",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "ps-agent/v1"
+    },
+    "job_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,96}$"
+    },
+    "job_type": {
+      "type": "string",
+      "enum": [
+        "ping",
+        "get_state",
+        "export_preview",
+        "export_regions",
+        "make_selection",
+        "selection_command",
+        "operation_recipe",
+        "selection_recipe",
+        "apply_mask_to_layer",
+        "apply_plan",
+        "delete_agent_group",
+        "undo_last_agent_edit"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "timeout_ms": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 300000
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "job_type": {
+            "const": "export_regions"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "regions"
+            ],
+            "properties": {
+              "regions": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 12,
+                "items": {
+                  "$ref": "#/$defs/region_request"
+                }
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "png",
+                  "jpeg"
+                ],
+                "default": "jpeg"
+              },
+                            "max_side": {
+                                "type": "integer",
+                                "minimum": 128,
+                                "maximum": 2048,
+                                "default": 1536
+                            },
+                            "upscale_small_regions": {
+                                "type": "boolean",
+                                "default": true
+                            },
+                            "quality": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 12,
+                "default": 8
+              },
+              "return_before_after": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "job_type": {
+            "const": "apply_plan"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "plan"
+            ],
+            "properties": {
+              "plan": {
+                "$ref": "ps-agent-plan.schema.json"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "bbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "region_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "bbox"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:-]{1,96}$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "bbox"
+          ]
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        },
+        "purpose": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "padding": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 512,
+          "default": 0
+        }
+      }
+    }
+  }
+}

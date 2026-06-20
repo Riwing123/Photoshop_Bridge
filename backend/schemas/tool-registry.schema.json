@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.ps-agent/schemas/tool-registry.schema.json",
+  "title": "PS Agent Tool Registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol_version",
+    "backend",
+    "default_timeout_ms",
+    "tools"
+  ],
+  "properties": {
+    "protocol_version": {
+      "type": "string",
+      "const": "ps-agent/v1"
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default_base_url"
+      ],
+      "properties": {
+        "default_base_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "uxp_polling_path": {
+          "type": "string"
+        },
+        "uxp_result_path_template": {
+          "type": "string"
+        }
+      }
+    },
+    "default_timeout_ms": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 300000
+    },
+    "tools": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/tool"
+      }
+    }
+  },
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "title",
+        "description",
+        "transport",
+        "inputSchema",
+        "outputSchema",
+        "safety"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^ps_[a-z0-9_]+$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "local",
+            "direct_http",
+            "http_job_queue"
+          ]
+        },
+        "endpoint": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "path"
+          ],
+          "properties": {
+            "method": {
+              "type": "string",
+              "enum": [
+                "GET",
+                "POST"
+              ]
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        },
+        "job_type": {
+          "type": "string",
+          "enum": [
+            "ping",
+            "get_state",
+            "export_preview",
+            "export_regions",
+            "make_selection",
+            "apply_plan",
+            "delete_agent_group",
+            "undo_last_agent_edit"
+          ]
+        },
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "safety": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "modifies_document",
+            "requires_active_document",
+            "requires_user_confirmation",
+            "returns_images"
+          ],
+          "properties": {
+            "modifies_document": {
+              "type": "boolean"
+            },
+            "requires_active_document": {
+              "type": "boolean"
+            },
+            "requires_user_confirmation": {
+              "type": "boolean"
+            },
+            "returns_images": {
+              "type": "boolean"
+            }
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

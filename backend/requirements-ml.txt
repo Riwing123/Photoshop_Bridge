@@ -1,0 +1,6 @@
+mediapipe>=0.10
+pillow>=10
+numpy>=1.26
+
+# SAM worker is installed separately in D:\Photo_sontrol\.venv-sam.
+# Keep torch/sam2 out of the main backend environment to protect bridge stability.

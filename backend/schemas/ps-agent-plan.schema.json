@@ -1,0 +1,1088 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.ps-agent/schemas/ps-agent-plan.schema.json",
+  "title": "PS Agent Edit Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "goal",
+    "ops",
+    "safety"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "ps-agent/v1"
+    },
+    "plan_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,96}$"
+    },
+    "base_revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "ops": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/operation"
+      }
+    },
+    "review": {
+      "$ref": "#/$defs/review_request"
+    },
+    "safety": {
+      "$ref": "#/$defs/safety"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "array",
+          "object",
+          "null"
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "target",
+        "params"
+      ],
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "adjust_exposure",
+            "adjust_vibrance",
+            "adjust_color_balance",
+            "adjust_hue_saturation",
+            "adjust_curves",
+            "adjust_levels",
+            "adjust_selective_color",
+            "adjust_gradient_map",
+            "adjust_color_lookup",
+            "camera_raw_filter"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "params": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Operation params. camera_raw_filter supports flat legacy params or grouped basic/color/presence/detail params.",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "array",
+              "object",
+              "null"
+            ]
+          }
+        },
+        "layer": {
+          "$ref": "#/$defs/layer_options"
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "adjust_hue_saturation"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/hue_saturation_params"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "camera_raw_filter"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/camera_raw_params"
+              },
+              "target": {
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "global",
+                      "acr_ai_mask"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "global",
+            "selection_mask",
+            "acr_ai_mask"
+          ]
+        },
+        "selection_mask": {
+          "$ref": "#/$defs/selection_mask"
+        },
+        "acr_ai_mask": {
+          "$ref": "#/$defs/acr_ai_mask"
+        },
+        "region_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:-]{1,96}$"
+        },
+        "layer_id": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        }
+      }
+    },
+    "acr_ai_mask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mask_type"
+      ],
+      "properties": {
+        "engine": {
+          "type": "string",
+          "enum": [
+            "camera_raw_internal",
+            "photoshop_selection_fallback"
+          ],
+          "default": "camera_raw_internal"
+        },
+        "mask_type": {
+          "type": "string",
+          "enum": [
+            "subject",
+            "background",
+            "sky",
+            "person",
+            "face_skin",
+            "body_skin",
+            "eyes",
+            "lips",
+            "hair",
+            "teeth"
+          ]
+        },
+        "person_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "enum": [
+              "face_skin",
+              "body_skin",
+              "eyebrows",
+              "eye_sclera",
+              "iris_pupil",
+              "lips",
+              "teeth",
+              "hair"
+            ]
+          }
+        },
+        "combine": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/acr_ai_mask_combine_item"
+          }
+        },
+        "feather": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 500,
+          "default": 0
+        },
+        "invert": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "acr_ai_mask_combine_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "mask_type"
+      ],
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "add",
+            "subtract",
+            "intersect"
+          ]
+        },
+        "mask_type": {
+          "type": "string",
+          "enum": [
+            "subject",
+            "background",
+            "sky",
+            "person",
+            "face_skin",
+            "body_skin",
+            "eyes",
+            "lips",
+            "hair",
+            "teeth"
+          ]
+        },
+        "person_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "selection_mask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "current_selection",
+            "bbox",
+            "polygon",
+            "select_subject",
+            "select_sky",
+            "color_range",
+            "composite",
+            "alpha_mask"
+          ]
+        },
+        "operation": {
+          "$ref": "#/$defs/selection_operation",
+          "default": "replace"
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        },
+        "points": {
+          "$ref": "#/$defs/polygon_points"
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/selection_mask_item"
+          }
+        },
+        "asset_path": {
+          "type": "string",
+          "description": "Absolute path to a full-document alpha mask PNG under this workspace."
+        },
+        "asset_uri": {
+          "type": "string",
+          "description": "Local backend /assets URI for a full-document alpha mask PNG."
+        },
+        "uri": {
+          "type": "string",
+          "description": "Alias for asset_uri."
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5
+        },
+        "show_marching_ants": {
+          "type": "boolean",
+          "default": false
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "preset": {
+          "type": "string",
+          "enum": [
+            "sampled",
+            "reds",
+            "yellows",
+            "greens",
+            "cyans",
+            "blues",
+            "magentas",
+            "skin_tones",
+            "highlights",
+            "midtones",
+            "shadows"
+          ]
+        },
+        "color": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["r", "g", "b"],
+          "properties": {
+            "r": { "type": "number", "minimum": 0, "maximum": 255 },
+            "g": { "type": "number", "minimum": 0, "maximum": 255 },
+            "b": { "type": "number", "minimum": 0, "maximum": 255 }
+          }
+        },
+        "fuzziness": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 200,
+          "default": 40
+        },
+        "localized_color_clusters": {
+          "type": "boolean",
+          "default": false
+        },
+        "feather": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 500,
+          "default": 0
+        },
+        "invert": {
+          "type": "boolean",
+          "default": false
+        },
+        "use_acr_mask": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "polygon"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "points"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "composite"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "items"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "alpha_mask"
+              }
+            }
+          },
+          "then": {
+            "anyOf": [
+              {
+                "required": [
+                  "asset_path"
+                ]
+              },
+              {
+                "required": [
+                  "asset_uri"
+                ]
+              },
+              {
+                "required": [
+                  "uri"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "color_range"
+              }
+            }
+          },
+          "then": {
+            "anyOf": [
+              {
+                "required": [
+                  "preset"
+                ]
+              },
+              {
+                "required": [
+                  "color"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "preset": {
+                "const": "sampled"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "color"
+            ]
+          }
+        }
+      ]
+    },
+    "selection_mask_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "operation"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "current_selection",
+            "bbox",
+            "polygon",
+            "select_subject",
+            "select_sky",
+            "color_range"
+          ]
+        },
+        "operation": {
+          "$ref": "#/$defs/selection_operation"
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        },
+        "points": {
+          "$ref": "#/$defs/polygon_points"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "preset": {
+          "type": "string",
+          "enum": [
+            "sampled",
+            "reds",
+            "yellows",
+            "greens",
+            "cyans",
+            "blues",
+            "magentas",
+            "skin_tones",
+            "highlights",
+            "midtones",
+            "shadows"
+          ]
+        },
+        "color": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["r", "g", "b"],
+          "properties": {
+            "r": { "type": "number", "minimum": 0, "maximum": 255 },
+            "g": { "type": "number", "minimum": 0, "maximum": 255 },
+            "b": { "type": "number", "minimum": 0, "maximum": 255 }
+          }
+        },
+        "fuzziness": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 200,
+          "default": 40
+        },
+        "localized_color_clusters": {
+          "type": "boolean",
+          "default": false
+        },
+        "feather": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 500,
+          "default": 0
+        },
+        "invert": {
+          "type": "boolean",
+          "default": false
+        },
+        "use_acr_mask": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "polygon"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "points"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "bbox"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "bbox"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "color_range"
+              }
+            }
+          },
+          "then": {
+            "anyOf": [
+              {
+                "required": [
+                  "preset"
+                ]
+              },
+              {
+                "required": [
+                  "color"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "preset": {
+                "const": "sampled"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "color"
+            ]
+          }
+        }
+      ]
+    },
+    "selection_operation": {
+      "type": "string",
+      "enum": [
+        "replace",
+        "add",
+        "subtract",
+        "intersect"
+      ]
+    },
+    "polygon_points": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 256,
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "prefixItems": [
+          {
+            "type": "number",
+            "minimum": 0
+          },
+          {
+            "type": "number",
+            "minimum": 0
+          }
+        ]
+      }
+    },
+    "bbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "hue_saturation_params": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "range": {
+          "type": "string",
+          "enum": [
+            "master",
+            "reds",
+            "yellows",
+            "greens",
+            "cyans",
+            "blues",
+            "magentas"
+          ],
+          "default": "master"
+        },
+        "hue": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180,
+          "default": 0
+        },
+        "saturation": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100,
+          "default": 0
+        },
+        "lightness": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100,
+          "default": 0
+        }
+      }
+    },
+    "camera_raw_params": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "tint": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "exposure": {
+          "type": "number",
+          "minimum": -5,
+          "maximum": 5
+        },
+        "contrast": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "highlights": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "shadows": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "whites": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "blacks": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "vibrance": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "saturation": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "texture": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "clarity": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "dehaze": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "sharpening": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 150
+        },
+        "luminance_noise_reduction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "color_noise_reduction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "basic": {
+          "$ref": "#/$defs/camera_raw_basic_params"
+        },
+        "color": {
+          "$ref": "#/$defs/camera_raw_color_params"
+        },
+        "presence": {
+          "$ref": "#/$defs/camera_raw_presence_params"
+        },
+        "detail": {
+          "$ref": "#/$defs/camera_raw_detail_params"
+        }
+      }
+    },
+    "camera_raw_basic_params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "tint": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "exposure": {
+          "type": "number",
+          "minimum": -5,
+          "maximum": 5
+        },
+        "contrast": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "highlights": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "shadows": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "whites": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "blacks": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        }
+      }
+    },
+    "camera_raw_color_params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "vibrance": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "saturation": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        }
+      }
+    },
+    "camera_raw_presence_params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "texture": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "clarity": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "dehaze": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100
+        }
+      }
+    },
+    "camera_raw_detail_params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sharpening": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 150
+        },
+        "luminance_noise_reduction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "color_noise_reduction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "layer_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "blend_mode": {
+          "type": "string",
+          "enum": [
+            "normal",
+            "multiply",
+            "screen",
+            "overlay",
+            "soft_light",
+            "color",
+            "luminosity"
+          ]
+        }
+      }
+    },
+    "review_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "export_global": {
+          "type": "boolean",
+          "default": true
+        },
+        "max_side": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 4096,
+          "default": 1600
+        },
+        "regions": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/region_request"
+          }
+        }
+      }
+    },
+    "region_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "bbox"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:-]{1,96}$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "bbox"
+          ]
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        },
+        "purpose": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "padding": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 512,
+          "default": 0
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "non_destructive",
+        "allow_destructive"
+      ],
+      "properties": {
+        "non_destructive": {
+          "type": "boolean",
+          "const": true
+        },
+        "create_history_state": {
+          "type": "boolean",
+          "default": true
+        },
+        "allow_destructive": {
+          "type": "boolean",
+          "const": false
+        },
+        "allow_experimental_acr_masks": {
+          "type": "boolean",
+          "default": false
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3,
+          "default": 2
+        }
+      }
+    }
+  }
+}
