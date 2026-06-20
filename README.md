@@ -365,6 +365,54 @@ Two important region-generation routes in this project are:
 
 The key design idea is that model output is treated as a reusable region source first, then lowered into the most appropriate Photoshop form: `alpha_mask`, polygon selection, or path.
 
+## Model Configuration
+
+Default local model paths:
+
+```text
+backend/models/face_landmarker.task
+backend/models/sam2/sam2.1_hiera_base_plus.pt
+backend/models/grounding_dino/groundingdino_swint_ogc.pth
+backend/models/grounding_dino/GroundingDINO_SwinT_OGC.py
+backend/models/sam_hq/sam_hq_vit_l.pth
+```
+
+Default service ports:
+
+- Main backend: `127.0.0.1:17860`
+- SAM worker: `127.0.0.1:17861`
+- Grounding DINO + HQ-SAM worker: `127.0.0.1:17862`
+
+Default SAM worker env:
+
+```text
+PS_AGENT_SAM_MODEL_PATH=backend/models/sam2/sam2.1_hiera_base_plus.pt
+PS_AGENT_SAM_CONFIG=configs/sam2.1/sam2.1_hiera_b+.yaml
+PS_AGENT_SAM_HOST=127.0.0.1
+PS_AGENT_SAM_PORT=17861
+```
+
+Default Grounding DINO + HQ-SAM env:
+
+```text
+PS_AGENT_GROUNDING_HQ_HOST=127.0.0.1
+PS_AGENT_GROUNDING_HQ_PORT=17862
+PS_AGENT_GROUNDING_DINO_MODEL_PATH=backend/models/grounding_dino/groundingdino_swint_ogc.pth
+PS_AGENT_GROUNDING_DINO_CONFIG_PATH=backend/models/grounding_dino/GroundingDINO_SwinT_OGC.py
+PS_AGENT_GROUNDING_DEVICE=auto
+PS_AGENT_HQSAM_MODEL_PATH=backend/models/sam_hq/sam_hq_vit_l.pth
+PS_AGENT_HQSAM_MODEL_TYPE=vit_l
+PS_AGENT_HQSAM_DEVICE=auto
+```
+
+Notes:
+
+- `Face Landmarker` does not need a separate worker; it only requires the local `backend/models/face_landmarker.task` file.
+- `SAM` and `Grounding DINO + HQ-SAM` run in `.venv-sam`, isolated from the main backend environment.
+- `Grounding DINO` uses `auto` by default and falls back to CPU when the CUDA extension is unavailable.
+- `HQ-SAM` also uses `auto`, preferring GPU when available and falling back to CPU otherwise.
+- These model files are intentionally excluded from Git tracking and should be downloaded locally.
+
 ## Setup
 
 ### 1. Create the backend environment
