@@ -18,7 +18,7 @@ const REQUEST_TIMEOUT_MS = 6000;
 const BACKOFF_MIN_MS = 1000;
 const BACKOFF_MAX_MS = 8000;
 const DEFAULT_REGION_MAX_SIDE = 1536;
-const PLUGIN_VERSION = "0.11.14";
+const PLUGIN_VERSION = "0.11.22";
 const START_COMMAND = "python D:\\Photo_sontrol\\backend\\cli.py daemon start";
 const MIN_POLYGON_POINTS = 3;
 const MAX_POLYGON_POINTS = 256;
@@ -1189,6 +1189,18 @@ function codedError(code, message, details) {
   return error;
 }
 
+
+function capturedCodexError(error) {
+  if (!error) {
+    return null;
+  }
+  return {
+    code: error.code || null,
+    message: String(error && error.message ? error.message : error),
+    details: error && error.details !== undefined ? error.details : null
+  };
+}
+
 function pixelUnit(value) {
   return {
     _unit: "pixelsUnit",
@@ -1792,13 +1804,40 @@ async function featherSelection(feather) {
   if (radius <= 0) {
     return;
   }
-  await playAction([
-    {
-      _obj: "feather",
-      radius: pixelUnit(radius),
-      _options: { dialogOptions: "dontDisplay" }
+  const selection = activeSelectionApi();
+  if (typeof selection.feather === "function") {
+    try {
+      await selection.feather(radius);
+      return;
+    } catch (error) {
+      throw codedError(
+        "selection_feather_failed",
+        "Photoshop rejected feathering the active selection.",
+        errorDetailsWithCause(error, {
+          radius,
+          method: "dom.selection.feather"
+        })
+      );
     }
-  ]);
+  }
+  try {
+    await playAction([
+      {
+        _obj: "feather",
+        radius: pixelUnit(radius),
+        _options: { dialogOptions: "dontDisplay" }
+      }
+    ]);
+  } catch (error) {
+    throw codedError(
+      "selection_feather_failed",
+      "Photoshop rejected feathering the active selection.",
+      errorDetailsWithCause(error, {
+        radius,
+        method: "batchPlay.feather"
+      })
+    );
+  }
 }
 
 async function invertSelection() {
@@ -1892,7 +1931,12 @@ function colorRangePresetValue(preset) {
   return mapping[String(preset || "")] || null;
 }
 
-async function selectColorRange(payload) {
+async function selectColorRange(payload, operation) {
+  const normalizedOperation = normalizedSelectionOperation(operation, "replace");
+  if (normalizedOperation !== "replace") {
+    await ensureSelectionOperationHasBase(normalizedOperation);
+  }
+  const selectionContext = await ensureSelectionWorkContext(payload && payload.preferred_layer_id != null ? payload.preferred_layer_id : null);
   const descriptor = {
     _obj: "colorRange",
     fuzziness: numberParam(payload.fuzziness, 40, 0, 200),
@@ -1910,63 +1954,150 @@ async function selectColorRange(payload) {
   if (payload.localized_color_clusters === true) {
     descriptor.localizedColorClusters = true;
   }
+  if (normalizedOperation !== "replace") {
+    const modifier = CHANNEL_SELECTION_MODIFIER_BY_OPERATION[normalizedOperation];
+    if (!modifier) {
+      throw codedError(
+        "invalid_selection_operation",
+        "Color Range selection supports replace, add, subtract, or intersect.",
+        { operation: normalizedOperation }
+      );
+    }
+    descriptor.selectionModifier = {
+      _enum: "selectionModifierType",
+      _value: modifier
+    };
+  }
   try {
     await playAction([descriptor]);
   } catch (error) {
     throw codedError(
       "color_range_descriptor_unavailable",
       "Photoshop rejected the Color Range descriptor; capture an Action.json descriptor for this Photoshop version to calibrate it.",
-      { message: error && error.message ? error.message : String(error), descriptor }
+      {
+        message: error && error.message ? error.message : String(error),
+        descriptor,
+        operation: normalizedOperation,
+        selection_context: selectionContext
+      }
     );
   }
 }
 
+
 async function selectColorRangeSelectionMask(mask, operation) {
+  const itemFeather = numberParam(mask && mask.feather, 0, 0, 500);
   if (operation === "replace") {
-    await selectColorRange(mask);
-    await featherSelection(mask.feather);
+    await selectColorRange(mask, operation);
+    await featherSelection(itemFeather);
+    return;
+  }
+
+  if (itemFeather <= 0) {
+    await selectColorRange(mask, operation);
+    if (!(await hasActiveSelection())) {
+      throw codedError(
+        "selection_empty",
+        `selection_mask source color_range with operation ${operation} did not leave a usable composite selection.`,
+        {
+          source: "color_range",
+          operation,
+          item_feather: itemFeather,
+          combine_method: "color_range.selectionModifier"
+        }
+      );
+    }
     return;
   }
 
   await ensureSelectionOperationHasBase(operation);
   const baseChannelName = tempSelectionChannelName("base");
-  const colorRangeChannelName = tempSelectionChannelName("color-range");
-  let baseSaved = false;
-  let colorRangeSaved = false;
+  const generatedChannelName = tempSelectionChannelName("color-range");
+  let baseChannel = null;
+  let generatedChannel = null;
+  let merged = false;
   try {
-    await saveSelectionChannel(baseChannelName);
-    baseSaved = true;
+    try {
+      baseChannel = await saveSelectionChannel(baseChannelName);
+    } catch (error) {
+      throw codedError(
+        "save_base_selection_channel_failed",
+        "Photoshop rejected saving the base selection before Color Range composition.",
+        errorDetailsWithCause(error, {
+          channel_name: baseChannelName,
+          source: "color_range",
+          operation,
+          item_feather: itemFeather,
+          combine_method: "alpha_channel_roundtrip"
+        })
+      );
+    }
 
-    await selectColorRange(mask);
-    await featherSelection(mask.feather);
+    await selectColorRange(mask, "replace");
+    await featherSelection(itemFeather);
     if (!(await hasActiveSelection())) {
       throw codedError(
         "selection_empty",
-        `selection_mask source color_range with operation ${operation} did not create a usable temporary selection.`
+        `selection_mask source color_range with operation ${operation} did not create a usable temporary selection.`,
+        {
+          source: "color_range",
+          operation,
+          item_feather: itemFeather,
+          combine_method: "alpha_channel_roundtrip"
+        }
       );
     }
-    await saveSelectionChannel(colorRangeChannelName);
-    colorRangeSaved = true;
-
-    await loadSelectionChannel(baseChannelName, "replace");
-    await loadSelectionChannel(colorRangeChannelName, operation);
+    try {
+      generatedChannel = await saveSelectionChannel(generatedChannelName);
+    } catch (error) {
+      throw codedError(
+        "save_generated_selection_channel_failed",
+        "Photoshop rejected saving the temporary Color Range selection before composition.",
+        errorDetailsWithCause(error, {
+          channel_name: generatedChannelName,
+          source: "color_range",
+          operation,
+          item_feather: itemFeather,
+          combine_method: "alpha_channel_roundtrip"
+        })
+      );
+    }
+    try {
+      await loadSelectionChannel(baseChannel || baseChannelName, "replace");
+      await loadSelectionChannel(generatedChannel || generatedChannelName, operation);
+      merged = true;
+    } catch (error) {
+      throw codedError(
+        "merge_color_range_selection_failed",
+        "Photoshop rejected combining the saved base selection with the Color Range selection.",
+        errorDetailsWithCause(error, {
+          base_channel_name: baseChannelName,
+          generated_channel_name: generatedChannelName,
+          source: "color_range",
+          operation,
+          item_feather: itemFeather,
+          combine_method: "alpha_channel_roundtrip"
+        })
+      );
+    }
   } catch (error) {
-    if (baseSaved) {
+    if (baseChannel && !merged) {
       try {
-        await loadSelectionChannel(baseChannelName, "replace");
+        await loadSelectionChannel(baseChannel, "replace");
       } catch (restoreError) {
       }
     }
     throw error;
   } finally {
-    if (colorRangeSaved) {
-      await deleteSelectionChannel(colorRangeChannelName);
+    if (generatedChannel) {
+      await deleteSelectionChannel(generatedChannel);
     }
-    if (baseSaved) {
-      await deleteSelectionChannel(baseChannelName);
+    if (baseChannel) {
+      await deleteSelectionChannel(baseChannel);
     }
   }
 }
+
 
 async function selectGeneratedSelectionMask(mask, operation, source, runSelector) {
   if (operation === "replace") {
@@ -1978,11 +2109,23 @@ async function selectGeneratedSelectionMask(mask, operation, source, runSelector
   await ensureSelectionOperationHasBase(operation);
   const baseChannelName = tempSelectionChannelName("base");
   const generatedChannelName = tempSelectionChannelName(source);
-  let baseSaved = false;
-  let generatedSaved = false;
+  let baseChannel = null;
+  let generatedChannel = null;
+  let merged = false;
   try {
-    await saveSelectionChannel(baseChannelName);
-    baseSaved = true;
+    try {
+      baseChannel = await saveSelectionChannel(baseChannelName);
+    } catch (error) {
+      throw codedError(
+        "save_base_selection_channel_failed",
+        `Photoshop rejected saving the base selection before composing ${source}.`,
+        errorDetailsWithCause(error, {
+          channel_name: baseChannelName,
+          source,
+          operation
+        })
+      );
+    }
 
     await runSelector();
     await featherSelection(mask.feather);
@@ -1992,25 +2135,49 @@ async function selectGeneratedSelectionMask(mask, operation, source, runSelector
         `selection_mask source ${source} with operation ${operation} did not create a usable temporary selection.`
       );
     }
-    await saveSelectionChannel(generatedChannelName);
-    generatedSaved = true;
-
-    await loadSelectionChannel(baseChannelName, "replace");
-    await loadSelectionChannel(generatedChannelName, operation);
+    try {
+      generatedChannel = await saveSelectionChannel(generatedChannelName);
+    } catch (error) {
+      throw codedError(
+        "save_generated_selection_channel_failed",
+        `Photoshop rejected saving the temporary ${source} selection before composition.`,
+        errorDetailsWithCause(error, {
+          channel_name: generatedChannelName,
+          source,
+          operation
+        })
+      );
+    }
+    try {
+      await loadSelectionChannel(baseChannel || baseChannelName, "replace");
+      await loadSelectionChannel(generatedChannel || generatedChannelName, operation);
+      merged = true;
+    } catch (error) {
+      throw codedError(
+        "merge_generated_selection_failed",
+        `Photoshop rejected combining the saved base selection with the ${source} selection.`,
+        errorDetailsWithCause(error, {
+          base_channel_name: baseChannelName,
+          generated_channel_name: generatedChannelName,
+          source,
+          operation
+        })
+      );
+    }
   } catch (error) {
-    if (baseSaved) {
+    if (baseChannel && !merged) {
       try {
-        await loadSelectionChannel(baseChannelName, "replace");
+        await loadSelectionChannel(baseChannel, "replace");
       } catch (restoreError) {
       }
     }
     throw error;
   } finally {
-    if (generatedSaved) {
-      await deleteSelectionChannel(generatedChannelName);
+    if (generatedChannel) {
+      await deleteSelectionChannel(generatedChannel);
     }
-    if (baseSaved) {
-      await deleteSelectionChannel(baseChannelName);
+    if (baseChannel) {
+      await deleteSelectionChannel(baseChannel);
     }
   }
 }
@@ -2033,28 +2200,438 @@ async function selectFocusArea(payload) {
   }
 }
 
-async function saveSelectionChannel(channelName) {
-  if (!(await hasActiveSelection())) {
-    throw codedError("no_active_selection", "Cannot save selection because no active Photoshop selection exists.");
+
+function errorDetailsWithCause(error, extra) {
+  return Object.assign({}, extra || {}, {
+    cause_code: error && error.code ? error.code : null,
+    cause_message: error && error.message ? error.message : String(error),
+    cause_details: error && error.details !== undefined ? error.details : null
+  });
+}
+
+function selectionWorkLayerPriority(layer) {
+  const kind = String(layer && layer.kind != null ? layer.kind : "").toLowerCase();
+  switch (kind) {
+    case "pixel":
+    case "background":
+      return 0;
+    case "smartobject":
+    case "smart_object":
+      return 1;
+    case "normal":
+      return 2;
+    case "huesaturation":
+    case "curves":
+    case "levels":
+    case "brightnesscontrast":
+    case "selectivecolor":
+    case "colorbalance":
+    case "vibrance":
+      return 3;
+    default:
+      return 10;
+  }
+}
+
+function collectSelectionWorkLayerCandidates(layersLike, output) {
+  const layers = Array.isArray(layersLike) ? layersLike : Array.from(layersLike || []);
+  const candidates = output || [];
+  for (const layer of layers) {
+    if (!layer) {
+      continue;
+    }
+    let children = [];
+    try {
+      if (layer.layers) {
+        children = Array.from(layer.layers || []);
+      }
+    } catch (error) {
+      children = [];
+    }
+    if (children.length) {
+      collectSelectionWorkLayerCandidates(children, candidates);
+      continue;
+    }
+    if (layer.id != null) {
+      candidates.push(layer);
+    }
+  }
+  return candidates;
+}
+
+function resolveSelectionWorkLayer(preferredLayerId) {
+  const doc = app.activeDocument;
+  if (!doc) {
+    return null;
+  }
+  const preferred = preferredLayerId == null ? null : findLayerObjectById(doc.layers || [], preferredLayerId);
+  if (preferred && preferred.id != null) {
+    try {
+      if (!preferred.layers || !Array.from(preferred.layers || []).length) {
+        return preferred;
+      }
+    } catch (error) {
+      return preferred;
+    }
+  }
+  const candidates = collectSelectionWorkLayerCandidates(doc.layers || [], []);
+  if (!candidates.length) {
+    return null;
+  }
+  candidates.sort((left, right) => {
+    const priorityDelta = selectionWorkLayerPriority(left) - selectionWorkLayerPriority(right);
+    if (priorityDelta !== 0) {
+      return priorityDelta;
+    }
+    const leftId = Number(left && left.id);
+    const rightId = Number(right && right.id);
+    if (Number.isFinite(leftId) && Number.isFinite(rightId)) {
+      return leftId - rightId;
+    }
+    return 0;
+  });
+  return candidates[0] || null;
+}
+
+function selectionContextSnapshot() {
+  const doc = app.activeDocument;
+  if (!doc) {
+    return {
+      has_active_document: false
+    };
+  }
+  let activeChannelNames = [];
+  let componentChannelNames = [];
+  let activeLayerIds = [];
+  try {
+    activeChannelNames = Array.from(doc.activeChannels || []).map((channel) => channel && channel.name ? String(channel.name) : null).filter(Boolean);
+  } catch (error) {
   }
   try {
+    componentChannelNames = Array.from(doc.componentChannels || []).map((channel) => channel && channel.name ? String(channel.name) : null).filter(Boolean);
+  } catch (error) {
+  }
+  try {
+    activeLayerIds = Array.from(doc.activeLayers || []).map((layer) => layer && layer.id != null ? Number(layer.id) : null).filter((value) => value != null);
+  } catch (error) {
+  }
+  return {
+    has_active_document: true,
+    quick_mask_mode: doc.quickMaskMode === true,
+    active_channels: activeChannelNames,
+    component_channels: componentChannelNames,
+    active_layer_ids: activeLayerIds
+  };
+}
+
+async function ensureSelectionWorkContext(preferredLayerId) {
+  const doc = app.activeDocument;
+  if (!doc) {
+    throw codedError("no_active_document", "Cannot restore selection work context because no active document exists.");
+  }
+  const attempts = [];
+  const snapshotBefore = selectionContextSnapshot();
+
+  if (doc.quickMaskMode === true) {
+    try {
+      doc.quickMaskMode = false;
+    } catch (error) {
+      attempts.push({
+        method: "dom.document.quickMaskMode=false",
+        ...errorDetailsWithCause(error)
+      });
+    }
+  }
+
+  try {
+    const componentChannels = Array.from(doc.componentChannels || []);
+    if (componentChannels.length) {
+      doc.activeChannels = componentChannels;
+    }
+  } catch (error) {
+    attempts.push({
+      method: "dom.document.activeChannels=componentChannels",
+      ...errorDetailsWithCause(error)
+    });
+  }
+
+  const activeLayerIds = readActiveLayerIds(doc);
+  let restoredLayerId = activeLayerIds.size ? Array.from(activeLayerIds)[0] : null;
+  if (!activeLayerIds.size) {
+    const targetLayer = resolveSelectionWorkLayer(preferredLayerId);
+    if (!targetLayer) {
+      attempts.push({
+        method: "resolve.selection.work.layer",
+        cause_code: "selection_work_layer_missing",
+        cause_message: "No usable layer was available to restore selection work context.",
+        cause_details: {
+          preferred_layer_id: preferredLayerId == null ? null : Number(preferredLayerId)
+        }
+      });
+    } else {
+      try {
+        doc.activeLayers = [targetLayer];
+        restoredLayerId = targetLayer.id == null ? null : Number(targetLayer.id);
+      } catch (error) {
+        attempts.push({
+          method: "dom.document.activeLayers=[layer]",
+          ...errorDetailsWithCause(error, {
+            preferred_layer_id: preferredLayerId == null ? null : Number(preferredLayerId),
+            target_layer_id: targetLayer.id == null ? null : Number(targetLayer.id)
+          })
+        });
+        try {
+          await selectLayer(targetLayer.id);
+          restoredLayerId = targetLayer.id == null ? null : Number(targetLayer.id);
+        } catch (fallbackError) {
+          attempts.push({
+            method: "batchPlay.selectLayer",
+            ...errorDetailsWithCause(fallbackError, {
+              preferred_layer_id: preferredLayerId == null ? null : Number(preferredLayerId),
+              target_layer_id: targetLayer.id == null ? null : Number(targetLayer.id)
+            })
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    preferred_layer_id: preferredLayerId == null ? null : Number(preferredLayerId),
+    restored_layer_id: restoredLayerId == null ? null : Number(restoredLayerId),
+    attempts,
+    before: snapshotBefore,
+    after: selectionContextSnapshot()
+  };
+}
+
+async function activateCompositeChannelForSelectionWork() {
+  try {
+    const doc = app.activeDocument;
+    if (!doc) {
+      return false;
+    }
+    const componentChannels = Array.from(doc.componentChannels || []);
+    if (!componentChannels.length) {
+      return false;
+    }
+    doc.activeChannels = componentChannels;
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function selectionChannelName(channelRefOrName) {
+  if (channelRefOrName && typeof channelRefOrName === "object" && channelRefOrName.name != null) {
+    return String(channelRefOrName.name);
+  }
+  return String(channelRefOrName || "");
+}
+
+function selectionChannelTargetRef(channelRefOrName) {
+  if (channelRefOrName && typeof channelRefOrName === "object") {
+    if (channelRefOrName.id != null) {
+      return { _ref: "channel", _id: Number(channelRefOrName.id) };
+    }
+    if (channelRefOrName.name != null) {
+      return { _ref: "channel", _name: String(channelRefOrName.name) };
+    }
+  }
+  return { _ref: "channel", _name: selectionChannelName(channelRefOrName) };
+}
+
+function activeDocumentChannels() {
+  const document = app.activeDocument;
+  const channels = document && document.channels;
+  if (!channels) {
+    throw codedError(
+      "selection_channel_api_unavailable",
+      "Photoshop document channels are unavailable for the active document."
+    );
+  }
+  return channels;
+}
+
+function tryGetDocumentChannelByName(channelName) {
+  const expectedName = String(channelName || "");
+  if (!expectedName) {
+    return null;
+  }
+  const channels = activeDocumentChannels();
+  if (typeof channels.getByName === "function") {
+    try {
+      const directMatch = channels.getByName(expectedName);
+      if (directMatch) {
+        return directMatch;
+      }
+    } catch (error) {
+    }
+  }
+  if (typeof channels.length === "number") {
+    for (let index = 0; index < channels.length; index += 1) {
+      const channel = channels[index];
+      if (channel && channel.name === expectedName) {
+        return channel;
+      }
+    }
+  }
+  if (typeof channels[Symbol.iterator] === "function") {
+    for (const channel of channels) {
+      if (channel && channel.name === expectedName) {
+        return channel;
+      }
+    }
+  }
+  return null;
+}
+
+function getDocumentChannelByName(channelName) {
+  const channel = tryGetDocumentChannelByName(channelName);
+  if (channel) {
+    return channel;
+  }
+  throw codedError(
+    "selection_channel_missing",
+    `Photoshop could not find alpha channel: ${String(channelName)}.`,
+    { channel_name: String(channelName) }
+  );
+}
+
+function resolveDocumentChannel(channelRefOrName) {
+  if (channelRefOrName && typeof channelRefOrName === "object") {
+    return channelRefOrName;
+  }
+  return getDocumentChannelByName(channelRefOrName);
+}
+
+
+async function saveSelectionChannel(channelName) {
+  const selectionContext = await ensureSelectionWorkContext();
+  if (!(await hasActiveSelection())) {
+    throw codedError("no_active_selection", "Cannot save selection because no active Photoshop selection exists.", {
+      selection_context: selectionContext
+    });
+  }
+  const normalizedChannelName = String(channelName);
+  const attempts = [];
+  const selection = activeSelectionApi();
+  const existingChannel = tryGetDocumentChannelByName(normalizedChannelName);
+  await activateCompositeChannelForSelectionWork();
+
+  if (existingChannel && typeof selection.saveTo === "function") {
+    try {
+      await activateCompositeChannelForSelectionWork();
+      await selection.saveTo(existingChannel, selectionTypeForOperation("replace"));
+      return existingChannel;
+    } catch (error) {
+      attempts.push({
+        method: "dom.selection.saveTo",
+        ...errorDetailsWithCause(error, {
+          channel_name: normalizedChannelName,
+          reused_existing_channel: true,
+          selection_context: selectionContext
+        })
+      });
+    }
+  }
+
+  if (typeof selection.save === "function") {
+    try {
+      if (existingChannel) {
+        await deleteSelectionChannel(existingChannel);
+      }
+      await activateCompositeChannelForSelectionWork();
+      await selection.save(normalizedChannelName);
+      return getDocumentChannelByName(normalizedChannelName);
+    } catch (error) {
+      attempts.push({
+        method: "dom.selection.save",
+        ...errorDetailsWithCause(error, {
+          channel_name: normalizedChannelName,
+          reused_existing_channel: existingChannel != null,
+          selection_context: selectionContext
+        })
+      });
+    }
+  }
+
+  if (!existingChannel && typeof selection.saveTo === "function") {
+    let createdChannel = null;
+    try {
+      const channels = activeDocumentChannels();
+      if (typeof channels.add !== "function") {
+        throw codedError(
+          "selection_channel_create_unavailable",
+          "Photoshop document channels cannot create a new alpha channel in this build.",
+          { channel_name: normalizedChannelName }
+        );
+      }
+      createdChannel = await channels.add();
+      if (!createdChannel) {
+        throw new Error("Document.channels.add returned no channel.");
+      }
+      try {
+        createdChannel.name = normalizedChannelName;
+      } catch (renameError) {
+      }
+      await activateCompositeChannelForSelectionWork();
+      await selection.saveTo(createdChannel, selectionTypeForOperation("replace"));
+      return createdChannel;
+    } catch (error) {
+      attempts.push({
+        method: "dom.selection.saveTo.after_channel_add",
+        ...errorDetailsWithCause(error, {
+          channel_name: normalizedChannelName,
+          reused_existing_channel: false,
+          selection_context: selectionContext
+        })
+      });
+      if (createdChannel) {
+        try {
+          await deleteSelectionChannel(createdChannel);
+        } catch (cleanupError) {
+        }
+      }
+    }
+  }
+
+  try {
+    const existingForDuplicate = tryGetDocumentChannelByName(normalizedChannelName);
+    if (existingForDuplicate) {
+      await deleteSelectionChannel(existingForDuplicate);
+    }
+    await activateCompositeChannelForSelectionWork();
     await playAction([
       {
         _obj: "duplicate",
         _target: [
           { _ref: "channel", _property: "selection" }
         ],
-        name: String(channelName),
+        name: normalizedChannelName,
         _options: { dialogOptions: "dontDisplay" }
       }
     ]);
+    return getDocumentChannelByName(normalizedChannelName);
   } catch (error) {
-    throw codedError(
-      "save_selection_channel_failed",
-      "Photoshop rejected saving the active selection to an alpha channel.",
-      { message: error && error.message ? error.message : String(error), channel_name: channelName }
-    );
+    attempts.push({
+      method: "batchPlay.duplicateSelection",
+      ...errorDetailsWithCause(error, {
+        channel_name: normalizedChannelName,
+        reused_existing_channel: existingChannel != null,
+        selection_context: selectionContext
+      })
+    });
   }
+
+  throw codedError(
+    "save_selection_channel_failed",
+    "Photoshop rejected saving the active selection to an alpha channel.",
+    {
+      channel_name: normalizedChannelName,
+      attempts
+    }
+  );
 }
 
 function tempSelectionChannelName(prefix) {
@@ -2062,17 +2639,113 @@ function tempSelectionChannelName(prefix) {
   return `Codex ${prefix} ${Date.now()} ${randomPart}`.slice(0, 120);
 }
 
-async function loadSelectionChannel(channelName, operation) {
+async function mergeActiveSelectionIntoNamedChannel(channelRefOrName, operation) {
+  const selectionContext = await ensureSelectionWorkContext();
+  const normalizedOperation = normalizedSelectionOperation(operation, "replace");
+  const channelName = selectionChannelName(channelRefOrName);
+  if (!(await hasActiveSelection())) {
+    throw codedError("no_active_selection", "Cannot merge selection because no active Photoshop selection exists.", {
+      selection_context: selectionContext
+    });
+  }
+
+  const attempts = [];
+  const selection = activeSelectionApi();
+  let channel = null;
+  try {
+    channel = resolveDocumentChannel(channelRefOrName);
+  } catch (error) {
+    attempts.push({
+      method: "resolve.selection.channel",
+      ...errorDetailsWithCause(error, {
+        channel_name: channelName,
+        operation: normalizedOperation
+      })
+    });
+  }
+
+  if (channel && typeof selection.saveTo === "function") {
+    try {
+      await activateCompositeChannelForSelectionWork();
+      await selection.saveTo(channel, selectionTypeForOperation(normalizedOperation));
+      return channel;
+    } catch (error) {
+      attempts.push({
+        method: "dom.selection.saveTo",
+        ...errorDetailsWithCause(error, {
+          channel_name: channelName,
+          operation: normalizedOperation,
+          selection_context: selectionContext
+        })
+      });
+    }
+  }
+
+  if (normalizedOperation === "replace") {
+    try {
+      return await saveSelectionChannel(channelName);
+    } catch (error) {
+      attempts.push({
+        method: "dom.selection.replace_via_save",
+        ...errorDetailsWithCause(error, {
+          channel_name: channelName,
+          operation: normalizedOperation
+        })
+      });
+    }
+  }
+
+  throw codedError(
+    "merge_selection_channel_failed",
+    "Photoshop rejected merging the active selection into the named alpha channel.",
+    {
+      channel_name: channelName,
+      operation: normalizedOperation,
+      attempts
+    }
+  );
+}
+
+async function loadSelectionChannel(channelRefOrName, operation) {
+  const selectionContext = await ensureSelectionWorkContext();
   const normalizedOperation = String(operation || "replace");
+  const channelName = selectionChannelName(channelRefOrName);
+  const attempts = [];
+  const selection = activeSelectionApi();
+  let channel = null;
+  try {
+    channel = resolveDocumentChannel(channelRefOrName);
+  } catch (error) {
+    attempts.push({
+      method: "resolve.selection.channel",
+      ...errorDetailsWithCause(error, {
+        channel_name: channelName,
+        operation: normalizedOperation
+      })
+    });
+  }
+  if (channel && typeof selection.load === "function") {
+    try {
+      await activateCompositeChannelForSelectionWork();
+      await selection.load(channel, selectionTypeForOperation(normalizedOperation));
+      return channel;
+    } catch (error) {
+      attempts.push({
+        method: "dom.selection.load",
+        ...errorDetailsWithCause(error, {
+          channel_name: channelName,
+          operation: normalizedOperation,
+          selection_context: selectionContext
+        })
+      });
+    }
+  }
   const descriptor = {
     _obj: "set",
     _target: [
       { _ref: "channel", _property: "selection" }
     ],
-    to: {
-      _ref: "channel",
-      _name: String(channelName)
-    },
+    to: selectionChannelTargetRef(channel || channelRefOrName),
     _options: { dialogOptions: "dontDisplay" }
   };
   if (normalizedOperation !== "replace") {
@@ -2090,35 +2763,65 @@ async function loadSelectionChannel(channelName, operation) {
     };
   }
   try {
+    await activateCompositeChannelForSelectionWork();
     await playAction([descriptor]);
+    return channel || channelRefOrName;
   } catch (error) {
-    throw codedError(
-      "load_selection_channel_failed",
-      "Photoshop rejected loading the named alpha channel as a selection.",
-      {
-        message: error && error.message ? error.message : String(error),
+    attempts.push({
+      method: "batchPlay.loadSelectionChannel",
+      ...errorDetailsWithCause(error, {
         channel_name: channelName,
         operation: normalizedOperation,
-        descriptor
-      }
-    );
+        descriptor,
+        selection_context: selectionContext
+      })
+    });
   }
+  throw codedError(
+    "load_selection_channel_failed",
+    "Photoshop rejected loading the named alpha channel as a selection.",
+    {
+      channel_name: channelName,
+      operation: normalizedOperation,
+      attempts
+    }
+  );
 }
 
-async function deleteSelectionChannel(channelName) {
+async function deleteSelectionChannel(channelRefOrName) {
+  const channelName = selectionChannelName(channelRefOrName);
+  let channel = null;
+  try {
+    channel = channelRefOrName && typeof channelRefOrName === "object"
+      ? channelRefOrName
+      : tryGetDocumentChannelByName(channelName);
+  } catch (error) {
+    channel = null;
+  }
+  if (channel && typeof channel.remove === "function") {
+    try {
+      await channel.remove();
+      return true;
+    } catch (error) {
+    }
+  }
+  if (!channel && !channelName) {
+    return false;
+  }
   try {
     await playAction([
       {
         _obj: "delete",
-        _target: [
-          { _ref: "channel", _name: String(channelName) }
-        ],
+        _target: [selectionChannelTargetRef(channel || channelName)],
         _options: { dialogOptions: "dontDisplay" }
       }
     ]);
+    return true;
   } catch (error) {
   }
+  return false;
 }
+
 
 async function makeLayerMaskFromSelection() {
   await playAction([
@@ -2137,6 +2840,7 @@ async function makeLayerMaskFromSelection() {
       _options: { dialogOptions: "dontDisplay" }
     }
   ]);
+  await activateCompositeChannelForSelectionWork();
 }
 
 function alphaMaskAssetUri(mask) {
@@ -2302,6 +3006,7 @@ function assertLegacyAcrMaskUnused(mask) {
   }
 }
 
+
 async function applySingleSelectionMask(mask, state, operation, options) {
   const source = mask.source;
   const opts = options || {};
@@ -2314,6 +3019,8 @@ async function applySingleSelectionMask(mask, state, operation, options) {
       { source, operation }
     );
   }
+
+  await activateCompositeChannelForSelectionWork();
 
   if (source === "current_selection") {
     if (operation !== "replace") {
@@ -7481,6 +8188,7 @@ function defaultLayerName(op, index) {
   return `Codex - ${names[op.op] || `Adjustment ${index + 1}`}`;
 }
 
+
 async function createAdjustmentLayer(op, index) {
   const layer = op.layer || {};
   const layerName = safeLayerName(layer.name, defaultLayerName(op, index));
@@ -7501,6 +8209,7 @@ async function createAdjustmentLayer(op, index) {
     }
   ]);
   await setActiveLayerProperties({ name: layerName, opacity, blendMode });
+  await activateCompositeChannelForSelectionWork();
   const layerId = await getActiveLayerId();
   return {
     op: op.op,
@@ -7510,6 +8219,71 @@ async function createAdjustmentLayer(op, index) {
     blend_mode: blendMode
   };
 }
+
+function collectLayerIdsForTraversal(layersLike, output) {
+  const layers = Array.isArray(layersLike) ? layersLike : Array.from(layersLike || []);
+  const ids = output || [];
+  for (const layer of layers) {
+    if (!layer) {
+      continue;
+    }
+    try {
+      if (layer.id != null) {
+        ids.push(Number(layer.id));
+      }
+    } catch (error) {
+    }
+    try {
+      if (layer.layers) {
+        collectLayerIdsForTraversal(layer.layers, ids);
+      }
+    } catch (error) {
+    }
+  }
+  return ids;
+}
+
+async function resolveCameraRawTargetDescriptor(preferredLayerId, allowFallback) {
+  const attempted = [];
+  if (preferredLayerId != null) {
+    try {
+      return await assertCameraRawTargetLayer(preferredLayerId);
+    } catch (error) {
+      if (!allowFallback || !(error && error.code === "unsupported_camera_raw_target")) {
+        throw error;
+      }
+      attempted.push({
+        layer_id: preferredLayerId,
+        ...errorDetailsWithCause(error)
+      });
+    }
+  }
+
+  const candidateIds = collectLayerIdsForTraversal(app.activeDocument && app.activeDocument.layers, []);
+  for (const candidateId of candidateIds) {
+    if (!Number.isFinite(candidateId) || (preferredLayerId != null && Number(candidateId) === Number(preferredLayerId))) {
+      continue;
+    }
+    try {
+      return await assertCameraRawTargetLayer(candidateId);
+    } catch (error) {
+      if (!(error && error.code === "unsupported_camera_raw_target")) {
+        throw error;
+      }
+      attempted.push({
+        layer_id: candidateId,
+        ...errorDetailsWithCause(error)
+      });
+    }
+  }
+
+  throw codedError(
+    "unsupported_camera_raw_target",
+    "camera_raw_filter requires a pixel or smart object layer target.",
+    { attempts: attempted }
+  );
+}
+
 
 async function applyCameraRawFilter(op, index, baseActiveLayerId, state, jobId) {
   const target = op.target || {};
@@ -7530,13 +8304,10 @@ async function applyCameraRawFilter(op, index, baseActiveLayerId, state, jobId) 
   const layerName = safeLayerName(layer.name, `Codex ACR - ${jobId || `op-${index + 1}`}`);
   const opacity = numberParam(layer.opacity, 100, 0, 100);
   const blendMode = blendModeValue(layer.blend_mode);
-  const targetLayerId = target.layer_id == null ? baseActiveLayerId : target.layer_id;
+  const preferredLayerId = target.layer_id == null ? baseActiveLayerId : target.layer_id;
+  const targetDescriptor = await resolveCameraRawTargetDescriptor(preferredLayerId, target.layer_id == null);
+  const targetLayerId = targetDescriptor.layerID == null ? targetDescriptor.id || preferredLayerId : targetDescriptor.layerID;
 
-  if (targetLayerId == null) {
-    throw codedError("no_target_layer", "camera_raw_filter requires an active layer or target.layer_id.");
-  }
-
-  const targetDescriptor = await assertCameraRawTargetLayer(targetLayerId);
   await selectLayer(targetLayerId);
   await duplicateActiveLayer(layerName);
   await convertActiveLayerToSmartObject();
@@ -7544,6 +8315,7 @@ async function applyCameraRawFilter(op, index, baseActiveLayerId, state, jobId) 
   await setActiveLayerProperties({ name: layerName, opacity, blendMode });
   const layerId = await getActiveLayerId();
   await clearSelection();
+  await activateCompositeChannelForSelectionWork();
 
   return {
     op: op.op,
@@ -7552,7 +8324,7 @@ async function applyCameraRawFilter(op, index, baseActiveLayerId, state, jobId) 
     opacity,
     blend_mode: blendMode,
     target_type: target.type || "global",
-    target_layer_id: targetDescriptor.layerID == null ? targetDescriptor.id || targetLayerId : targetDescriptor.layerID,
+    target_layer_id: targetLayerId,
     target_layer_name: targetDescriptor.name || null,
     smart_object: true,
     smart_filter: "camera_raw_filter"
@@ -7561,8 +8333,20 @@ async function applyCameraRawFilter(op, index, baseActiveLayerId, state, jobId) 
 
 async function applyAdjustmentOperation(op, index, state) {
   const target = op.target || {};
-  const maskInfo = await prepareSelectionMask(target, state);
+  const normalizedMask = target.type === "selection_mask" ? normalizeSelectionMaskForTarget(target) : null;
+  const deferCompositeFeatherToLayerMask = compositeSelectionCanUseLayerMaskFeather(normalizedMask);
+  const selectionTarget = deferCompositeFeatherToLayerMask
+    ? Object.assign({}, target, { selection_mask: selectionMaskWithoutCompositeFinalization(normalizedMask) })
+    : target;
+  const maskInfo = await prepareSelectionMask(selectionTarget, state);
   const applied = await createAdjustmentLayer(op, index);
+  if (deferCompositeFeatherToLayerMask) {
+    await applyLayerMaskFeatherByLayerId(applied.layer_id, normalizedMask.feather);
+    if (maskInfo) {
+      maskInfo.feather = numberParam(normalizedMask.feather, 0, 0, 500);
+      maskInfo.invert = normalizedMask.invert === true;
+    }
+  }
   await clearSelection();
   applied.target_type = target.type || "global";
   applied.mask_source = maskInfo ? maskInfo.source : null;
@@ -7628,6 +8412,7 @@ async function appendReviewPacket(job, plan, result, warnings) {
   }
 }
 
+
 async function applyPlan(job) {
   const payload = job.payload || {};
   const plan = payload.plan || {};
@@ -7649,6 +8434,7 @@ async function applyPlan(job) {
   const warnings = [];
   const appliedOps = [];
   let createdGroupId = null;
+  let modalError = null;
 
   try {
     await core.executeAsModal(async (executionContext) => {
@@ -7691,6 +8477,9 @@ async function applyPlan(job) {
           suspensionId = null;
         }
       } catch (error) {
+        if (!modalError) {
+          modalError = capturedCodexError(error);
+        }
         if (suspensionId) {
           try {
             await executionContext.hostControl.resumeHistory(suspensionId, false);
@@ -7702,15 +8491,26 @@ async function applyPlan(job) {
       }
     }, { commandName: historyName, timeOut: 30000 });
   } catch (error) {
-    const message = String(error && error.message ? error.message : error);
-    const code = error && error.code
-      ? error.code
+    const sourceError = modalError || capturedCodexError(error) || {
+      code: null,
+      message: String(error && error.message ? error.message : error),
+      details: null
+    };
+    const message = sourceError.message;
+    const code = sourceError.code
+      ? sourceError.code
       : message.toLowerCase().includes("modal") ? "modal_busy" : "apply_failed";
-    const details = { warnings };
-    if (error && error.details !== undefined) {
-      details.details = error.details;
+    const details = {};
+    if (warnings.length) {
+      details.warnings = warnings;
     }
-    return errorResult(job, code, message, details);
+    if (sourceError.code) {
+      details.captured_code = sourceError.code;
+    }
+    if (sourceError.details !== null) {
+      details.cause_details = sourceError.details;
+    }
+    return errorResult(job, code, message, Object.keys(details).length ? details : null);
   }
 
   const afterState = await readDocumentState(false);
@@ -7839,6 +8639,93 @@ async function undoLastAgentEdit(job) {
   };
 }
 
+
+function compositeSelectionNeedsPostModalFinalization(mask) {
+  return Boolean(
+    mask
+    && mask.source === "composite"
+    && (numberParam(mask.feather, 0, 0, 500) > 0 || mask.invert === true)
+  );
+}
+
+function selectionMaskWithoutCompositeFinalization(mask) {
+  const clone = Object.assign({}, mask || {});
+  clone.feather = 0;
+  clone.invert = false;
+  return clone;
+}
+
+function compositeSelectionCanUseLayerMaskFeather(mask) {
+  return Boolean(
+    mask
+    && mask.source === "composite"
+    && numberParam(mask.feather, 0, 0, 500) > 0
+    && mask.invert !== true
+  );
+}
+
+async function applyLayerMaskFeatherByLayerId(layerId, feather) {
+  const normalizedFeather = numberParam(feather, 0, 0, 1000);
+  if (normalizedFeather <= 0) {
+    return;
+  }
+  const doc = app.activeDocument;
+  const layer = findLayerObjectById(doc && doc.layers, layerId);
+  if (!layer) {
+    throw codedError(
+      "layer_mask_feather_target_missing",
+      "Cannot set layer mask feather because the adjustment layer could not be found.",
+      { layer_id: layerId, feather: normalizedFeather }
+    );
+  }
+  try {
+    layer.layerMaskFeather = normalizedFeather;
+  } catch (error) {
+    throw codedError(
+      "layer_mask_feather_failed",
+      "Photoshop rejected applying feather to the adjustment layer mask.",
+      errorDetailsWithCause(error, {
+        layer_id: layerId,
+        feather: normalizedFeather,
+        method: "dom.layer.layerMaskFeather"
+      })
+    );
+  }
+}
+
+async function applyCompositeSelectionFinalAdjustments(mask) {
+  await activateCompositeChannelForSelectionWork();
+  const feather = numberParam(mask && mask.feather, 0, 0, 500);
+  if (feather > 0) {
+    await featherSelection(feather);
+  }
+  if (mask && mask.invert === true) {
+    if (!(await hasActiveSelection())) {
+      throw codedError(
+        "no_active_selection",
+        "Cannot invert composite selection because no active selection exists after feathering.",
+        {
+          feather,
+          invert: true,
+          finalize_method: "post_modal"
+        }
+      );
+    }
+    await invertSelection();
+  }
+  if (!(await hasActiveSelection())) {
+    throw codedError(
+      "selection_empty",
+      "Composite selection final adjustments did not leave a usable selection.",
+      {
+        feather,
+        invert: mask && mask.invert === true,
+        finalize_method: "post_modal"
+      }
+    );
+  }
+}
+
 async function makeSelection(job) {
   const payload = job.payload || {};
   const state = await readDocumentState(false);
@@ -7851,23 +8738,54 @@ async function makeSelection(job) {
     return errorResult(job, "invalid_selection_mask", "payload.selection_mask must be an object.");
   }
 
+  const requiresPostModalFinalization = compositeSelectionNeedsPostModalFinalization(mask);
+  const initialMask = requiresPostModalFinalization
+    ? selectionMaskWithoutCompositeFinalization(mask)
+    : mask;
+
   let selectionInfo = null;
+  let modalError = null;
   try {
     await core.executeAsModal(async () => {
-      selectionInfo = await prepareSelectionMask(
-        {
-          type: "selection_mask",
-          selection_mask: mask
-        },
-        state
-      );
+      try {
+        selectionInfo = await prepareSelectionMask(
+          {
+            type: "selection_mask",
+            selection_mask: initialMask
+          },
+          state
+        );
+      } catch (error) {
+        modalError = capturedCodexError(error);
+        throw error;
+      }
     }, { commandName: `Codex Selection - ${job.job_id}`, timeOut: 30000 });
+
+    if (requiresPostModalFinalization) {
+      await core.executeAsModal(async () => {
+        try {
+          await applyCompositeSelectionFinalAdjustments(mask);
+        } catch (error) {
+          modalError = capturedCodexError(error);
+          throw error;
+        }
+      }, { commandName: `Codex Selection Finalize - ${job.job_id}`, timeOut: 30000 });
+      if (selectionInfo) {
+        selectionInfo.feather = numberParam(mask.feather, 0, 0, 500);
+        selectionInfo.invert = mask.invert === true;
+      }
+    }
   } catch (error) {
-    const message = String(error && error.message ? error.message : error);
-    const code = error && error.code
-      ? error.code
+    const sourceError = modalError || capturedCodexError(error) || {
+      code: null,
+      message: String(error && error.message ? error.message : error),
+      details: null
+    };
+    const message = sourceError.message;
+    const code = sourceError.code
+      ? sourceError.code
       : message.toLowerCase().includes("modal") ? "modal_busy" : "make_selection_failed";
-    return errorResult(job, code, message, error && error.details !== undefined ? error.details : null);
+    return errorResult(job, code, message, sourceError.details);
   }
 
   return {
@@ -7880,6 +8798,7 @@ async function makeSelection(job) {
   };
 }
 
+
 async function selectionCommand(job) {
   const payload = job.payload || {};
   const state = await readDocumentState(false);
@@ -7889,77 +8808,88 @@ async function selectionCommand(job) {
 
   const actionName = String(payload.action || "");
   let resultInfo = null;
+  let modalError = null;
   try {
     await core.executeAsModal(async () => {
-      if (actionName === "select_subject") {
-        await selectSubject();
-        await featherSelection(payload.feather);
-      } else if (actionName === "select_sky") {
-        await selectSky();
-        await featherSelection(payload.feather);
-      } else if (actionName === "select_all") {
-        await selectAll();
-      } else if (actionName === "deselect") {
-        await clearSelection();
-      } else if (actionName === "inverse") {
-        if (!(await hasActiveSelection())) {
-          throw codedError("no_active_selection", "Cannot inverse selection because no active selection exists.");
-        }
-        await invertSelection();
-      } else if (actionName === "color_range") {
-        await selectColorRange(payload);
-        await featherSelection(payload.feather);
-      } else if (actionName === "focus_area") {
-        await selectFocusArea(payload);
-        await featherSelection(payload.feather);
-      } else if (actionName === "modify") {
-        if (!(await hasActiveSelection())) {
-          throw codedError("no_active_selection", "Cannot modify selection because no active selection exists.");
-        }
-        const operation = String(payload.operation || "");
-        if (operation === "feather") {
-          await featherSelection(payload.amount);
-        } else if (operation === "expand") {
-          await expandSelection(payload.amount);
-        } else if (operation === "contract") {
-          await contractSelection(payload.amount);
-        } else if (operation === "smooth") {
-          await smoothSelection(payload.amount);
-        } else if (operation === "border") {
-          await borderSelection(payload.amount);
+      try {
+        if (actionName === "select_subject") {
+          await selectSubject();
+          await featherSelection(payload.feather);
+        } else if (actionName === "select_sky") {
+          await selectSky();
+          await featherSelection(payload.feather);
+        } else if (actionName === "select_all") {
+          await selectAll();
+        } else if (actionName === "deselect") {
+          await clearSelection();
+        } else if (actionName === "inverse") {
+          if (!(await hasActiveSelection())) {
+            throw codedError("no_active_selection", "Cannot inverse selection because no active selection exists.");
+          }
+          await invertSelection();
+        } else if (actionName === "color_range") {
+          await selectColorRange(payload);
+          await featherSelection(payload.feather);
+        } else if (actionName === "focus_area") {
+          await selectFocusArea(payload);
+          await featherSelection(payload.feather);
+        } else if (actionName === "modify") {
+          if (!(await hasActiveSelection())) {
+            throw codedError("no_active_selection", "Cannot modify selection because no active selection exists.");
+          }
+          const operation = String(payload.operation || "");
+          if (operation === "feather") {
+            await featherSelection(payload.amount);
+          } else if (operation === "expand") {
+            await expandSelection(payload.amount);
+          } else if (operation === "contract") {
+            await contractSelection(payload.amount);
+          } else if (operation === "smooth") {
+            await smoothSelection(payload.amount);
+          } else if (operation === "border") {
+            await borderSelection(payload.amount);
+          } else {
+            throw codedError("invalid_selection_modify_operation", `Unsupported selection modify operation: ${operation}`);
+          }
+        } else if (actionName === "save_selection") {
+          await saveSelectionChannel(payload.channel_name);
+        } else if (actionName === "load_selection") {
+          await loadSelectionChannel(payload.channel_name);
         } else {
-          throw codedError("invalid_selection_modify_operation", `Unsupported selection modify operation: ${operation}`);
+          throw codedError("unsupported_selection_command", `Unsupported selection command: ${actionName}`);
         }
-      } else if (actionName === "save_selection") {
-        await saveSelectionChannel(payload.channel_name);
-      } else if (actionName === "load_selection") {
-        await loadSelectionChannel(payload.channel_name);
-      } else {
-        throw codedError("unsupported_selection_command", `Unsupported selection command: ${actionName}`);
-      }
 
-      if (payload.invert === true && actionName !== "inverse") {
-        if (!(await hasActiveSelection())) {
-          throw codedError("no_active_selection", "Cannot invert after command because no active selection exists.");
+        if (payload.invert === true && actionName !== "inverse") {
+          if (!(await hasActiveSelection())) {
+            throw codedError("no_active_selection", "Cannot invert after command because no active selection exists.");
+          }
+          await invertSelection();
         }
-        await invertSelection();
-      }
 
-      resultInfo = {
-        action: actionName,
-        operation: payload.operation || null,
-        amount: payload.amount == null ? null : Number(payload.amount),
-        feather: payload.feather == null ? 0 : Number(payload.feather),
-        channel_name: payload.channel_name || null,
-        has_active_selection: await hasActiveSelection()
-      };
+        resultInfo = {
+          action: actionName,
+          operation: payload.operation || null,
+          amount: payload.amount == null ? null : Number(payload.amount),
+          feather: payload.feather == null ? 0 : Number(payload.feather),
+          channel_name: payload.channel_name || null,
+          has_active_selection: await hasActiveSelection()
+        };
+      } catch (error) {
+        modalError = capturedCodexError(error);
+        throw error;
+      }
     }, { commandName: `Codex Selection Command - ${actionName}`, timeOut: 30000 });
   } catch (error) {
-    const message = String(error && error.message ? error.message : error);
-    const code = error && error.code
-      ? error.code
+    const sourceError = modalError || capturedCodexError(error) || {
+      code: null,
+      message: String(error && error.message ? error.message : error),
+      details: null
+    };
+    const message = sourceError.message;
+    const code = sourceError.code
+      ? sourceError.code
       : message.toLowerCase().includes("modal") ? "modal_busy" : "selection_command_failed";
-    return errorResult(job, code, message, error && error.details !== undefined ? error.details : null);
+    return errorResult(job, code, message, sourceError.details);
   }
 
   return {
@@ -8981,4 +9911,8 @@ entrypoints.setup({
     }
   }
 });
+
+
+
+
 
