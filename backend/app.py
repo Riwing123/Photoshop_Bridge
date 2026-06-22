@@ -30,7 +30,13 @@ from ps_backend.grounding_hq import (
     generate_hqsam_mask,
     grounding_hq_worker_status,
 )
-from ps_backend.alpha_masks import asset_payload, compose_soft_masks
+from ps_backend.alpha_masks import (
+    asset_payload,
+    compose_soft_masks,
+    materialize_full_document_alpha_mask,
+    normalize_size,
+    resolve_workspace_asset_path,
+)
 from ps_backend.selection_strategy import create_selection_strategy, validate_selection_strategy
 from ps_backend.capabilities import (
     CAPABILITY_BY_ID,
@@ -190,17 +196,14 @@ CAMERA_RAW_GROUPS = {
 CAMERA_RAW_FLAT_PARAMS = set().union(*CAMERA_RAW_GROUPS.values())
 CAMERA_RAW_PARAMS = CAMERA_RAW_FLAT_PARAMS | set(CAMERA_RAW_GROUPS)
 SUPPORTED_TARGET_TYPES = {"global", "selection_mask", "acr_ai_mask"}
-SELECTION_MASK_SOURCES = {"current_selection", "bbox", "polygon", "select_subject", "select_sky", "color_range", "composite", "alpha_mask"}
-SELECTION_MASK_ITEM_SOURCES = {"current_selection", "bbox", "polygon", "select_subject", "select_sky", "color_range"}
+SELECTION_MASK_SOURCES = {"current_selection", "bbox", "polygon", "composite", "alpha_mask"}
+SELECTION_MASK_ITEM_SOURCES = {"current_selection", "bbox", "polygon"}
 SELECTION_MASK_OPERATIONS = {"replace", "add", "subtract", "intersect"}
+NATIVE_SELECTION_ACTIONS = {"select_subject", "select_sky", "color_range", "focus_area"}
 SELECTION_COMMAND_ACTIONS = {
-    "select_subject",
-    "select_sky",
     "select_all",
     "deselect",
     "inverse",
-    "color_range",
-    "focus_area",
     "modify",
     "save_selection",
     "load_selection",
@@ -1320,10 +1323,21 @@ def apply_soft_selection_recipe(body: dict[str, Any], asset_url_builder) -> dict
 
     relative_path = f"{job_id}/{alpha_path.name}"
     luma_relative_path = f"{job_id}/{luma_path.name}"
+    raw_relative_path = f"{job_id}/selection_recipe_alpha_mask.gray"
+    raw_path = asset_dir / "selection_recipe_alpha_mask.gray"
+    from PIL import Image
+    with Image.open(luma_path) as luma_file:
+        mask = luma_file.convert("L")
+        mask_width, mask_height = mask.size
+        raw_path.write_bytes(mask.tobytes())
     selection_mask = {
         "source": "alpha_mask",
         "asset_path": str(alpha_path),
         "asset_uri": asset_url_builder(relative_path) if asset_url_builder else None,
+        "raw_asset_path": str(raw_path),
+        "raw_asset_uri": asset_url_builder(raw_relative_path) if asset_url_builder else None,
+        "mask_width": mask_width,
+        "mask_height": mask_height,
         "threshold": float((merge_plan.get("threshold") if isinstance(merge_plan, dict) else None) or 0.5),
         "feather": float((merge_plan.get("feather") if isinstance(merge_plan, dict) else None) or 0),
         "invert": bool((merge_plan.get("invert") if isinstance(merge_plan, dict) else False)),
@@ -1339,6 +1353,7 @@ def apply_soft_selection_recipe(body: dict[str, Any], asset_url_builder) -> dict
         "selection_mask": selection_mask,
         "alpha_mask": asset_payload(relative_path, alpha_path, "image/png", asset_url_builder),
         "alpha_luma": asset_payload(luma_relative_path, luma_path, "image/png", asset_url_builder),
+        "alpha_raw": asset_payload(raw_relative_path, raw_path, "application/octet-stream", asset_url_builder),
         "merge_report": report,
         "warnings": validation.get("warnings", []),
     }
@@ -1652,7 +1667,29 @@ def validate_selection_command(body: dict[str, Any]) -> dict[str, Any]:
             errors.append(f"operation must be one of: {allowed}")
         validate_number(errors, body.get("amount"), "amount", 0, 500)
 
-    if action == "color_range":
+    if action in {"save_selection", "load_selection"}:
+        channel_name = body.get("channel_name")
+        if not isinstance(channel_name, str) or not channel_name.strip():
+            errors.append("channel_name must be a non-empty string")
+        elif len(channel_name) > 128:
+            errors.append("channel_name must be 128 characters or fewer")
+
+    return {
+        "status": "ok",
+        "valid": not errors,
+        "errors": errors,
+        "schema_version": "ps-agent/v1",
+    }
+
+
+def validate_native_selection_mask(body: dict[str, Any], *, require_selector_input: bool = True) -> dict[str, Any]:
+    errors: list[str] = []
+    action = body.get("action")
+    if action not in NATIVE_SELECTION_ACTIONS:
+        allowed = ", ".join(sorted(NATIVE_SELECTION_ACTIONS))
+        errors.append(f"action must be one of: {allowed}")
+
+    if action == "color_range" and require_selector_input:
         color = body.get("color")
         preset = body.get("preset")
         if color is None and preset is None:
@@ -1678,17 +1715,14 @@ def validate_selection_command(body: dict[str, Any]) -> dict[str, Any]:
         if "noise_level" in body:
             validate_number(errors, body["noise_level"], "noise_level", 0, 10)
 
-    if action in {"save_selection", "load_selection"}:
-        channel_name = body.get("channel_name")
-        if not isinstance(channel_name, str) or not channel_name.strip():
-            errors.append("channel_name must be a non-empty string")
-        elif len(channel_name) > 128:
-            errors.append("channel_name must be 128 characters or fewer")
-
     if "feather" in body:
         validate_number(errors, body["feather"], "feather", 0, 500)
     if "invert" in body:
         validate_bool(errors, body["invert"], "invert")
+    if "threshold" in body:
+        validate_number(errors, body["threshold"], "threshold", 0, 1)
+    if "show_marching_ants" in body:
+        validate_bool(errors, body["show_marching_ants"], "show_marching_ants")
 
     return {
         "status": "ok",
@@ -1696,6 +1730,93 @@ def validate_selection_command(body: dict[str, Any]) -> dict[str, Any]:
         "errors": errors,
         "schema_version": "ps-agent/v1",
     }
+
+
+def materialize_native_selection_mask(body: dict[str, Any], asset_url_builder) -> dict[str, Any]:
+    validation = validate_native_selection_mask(body, require_selector_input=False)
+    if not validation["valid"]:
+        return api_error("invalid_native_selection_mask", "Native selection request validation failed.", validation["errors"])
+
+    raw_asset_path = body.get("raw_asset_path")
+    if raw_asset_path is None:
+        return api_error("native_selection_raw_asset_missing", "raw_asset_path is required to materialize a native selection mask.")
+
+    try:
+        raw_path = resolve_workspace_asset_path(raw_asset_path)
+        document_size = normalize_size(body.get("document_size") or {"width": body.get("width"), "height": body.get("height")})
+        threshold = float(body.get("threshold", 0.5) or 0.5)
+        feather = float(body.get("feather", 0) or 0)
+        invert = body.get("invert") is True
+    except (FileNotFoundError, TypeError, ValueError) as exc:
+        return api_error("native_selection_materialize_invalid", str(exc))
+
+    source = str(body.get("action") or "native_selector")
+    label = str(body.get("label") or f"photoshop_native_{source}")[:128]
+    job_id = safe_path_part(str(body.get("job_id") or f"job-{uuid.uuid4().hex[:8]}"), "job")
+    asset_dir = ASSET_ROOT / job_id
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        outputs = materialize_full_document_alpha_mask(
+            raw_path,
+            asset_dir,
+            job_id,
+            document_size,
+            threshold=threshold,
+            feather=feather,
+            invert=invert,
+        )
+    except Exception as exc:
+        return api_error("native_selection_materialize_failed", str(exc))
+
+    relative_alpha = outputs["relative"]["alpha"]
+    relative_luma = outputs["relative"]["luma"]
+    relative_raw = outputs["relative"]["raw"]
+    selection_mask = {
+        "source": "alpha_mask",
+        "label": label,
+        "asset_path": str(outputs["alpha_path"]),
+        "asset_uri": asset_url_builder(relative_alpha) if asset_url_builder else None,
+        "raw_asset_path": str(outputs["raw_path"]),
+        "raw_asset_uri": asset_url_builder(relative_raw) if asset_url_builder else None,
+        "mask_width": document_size["width"],
+        "mask_height": document_size["height"],
+        "threshold": threshold,
+        "feather": 0.0,
+        "invert": False,
+        "show_marching_ants": body.get("show_marching_ants") is True,
+    }
+    result = {
+        "status": "ok",
+        "schema_version": "ps-agent/v1",
+        "job_id": job_id,
+        "source": f"photoshop_native.{source}",
+        "provider": f"photoshop_native.{source}",
+        "selection_kind": "native_selection_mask",
+        "document_size": document_size,
+        "coordinate_space": "document",
+        "soft_alpha": True,
+        "bounds": outputs["mask_bbox"],
+        "area_ratio": outputs["area_ratio"],
+        "selected_pixels": outputs["selected_pixels"],
+        "selection_mask": selection_mask,
+        "alpha_mask": asset_payload(relative_alpha, outputs["alpha_path"], "image/png", asset_url_builder),
+        "alpha_luma": asset_payload(relative_luma, outputs["luma_path"], "image/png", asset_url_builder),
+        "alpha_raw": asset_payload(relative_raw, outputs["raw_path"], "application/octet-stream", asset_url_builder),
+        "warnings": outputs["warnings"],
+    }
+    artifact = create_region_artifact(
+        {
+            "label": label,
+            "source": f"photoshop_native.{source}",
+            "source_result": result,
+        },
+        asset_url_builder,
+    )
+    if artifact.get("status") == "ok":
+        result["artifact"] = artifact.get("artifact")
+        result["artifacts"] = artifact.get("artifacts")
+        result["artifact_count"] = artifact.get("artifact_count", 1)
+    return result
 
 
 def normalize_tonal_range_name(value: Any) -> str:
@@ -1809,10 +1930,10 @@ def extract_tonal_range_request(body: dict[str, Any], forced_tonal_range: str | 
             "schema_version": "ps-agent/v1",
             "dry_run": True,
             "tonal_range": payload["preset"],
-            "selection_command": payload,
+            "native_selection_mask": payload,
         }
 
-    result = create_api_job("selection_command", payload)
+    result = create_api_job("native_selection_mask", payload)
     result["tonal_range"] = payload["preset"]
     result["selection_kind"] = "tonal_range"
     return result
@@ -1884,14 +2005,14 @@ def build_luminosity_mask_request(body: dict[str, Any]) -> dict[str, Any]:
 
     steps: list[dict[str, Any]] = []
 
-    select_result = create_api_job("selection_command", tonal_range_selection_payload(body, forced_tonal_range=tonal_range))
+    select_result = create_api_job("native_selection_mask", tonal_range_selection_payload(body, forced_tonal_range=tonal_range))
     steps.append(
         {
-            "step": "select_tonal_range",
+            "step": "materialize_tonal_range_mask",
             "tonal_range": tonal_range,
             "job_id": select_result.get("job_id"),
             "status": select_result.get("status"),
-            "selection": select_result.get("result", {}).get("selection"),
+            "selection_mask": select_result.get("result", {}).get("selection_mask"),
         }
     )
     if select_result.get("status") != "done":
@@ -1903,6 +2024,45 @@ def build_luminosity_mask_request(body: dict[str, Any]) -> dict[str, Any]:
             "steps": steps,
             "message": "Tonal range selection did not complete, so the alpha channel was not saved.",
             "job": select_result.get("job"),
+        }
+
+    tonal_selection_mask = select_result.get("result", {}).get("selection_mask")
+    if not isinstance(tonal_selection_mask, dict):
+        return {
+            "status": "error",
+            "schema_version": "ps-agent/v1",
+            "tonal_range": tonal_range,
+            "channel_name": channel_name,
+            "steps": steps,
+            "message": "The tonal range mask result did not include a reusable alpha selection_mask.",
+            "job": select_result.get("job"),
+        }
+
+    make_result = create_api_job(
+        "make_selection",
+        {
+            "selection_mask": tonal_selection_mask,
+            "wait": True,
+            "timeout_ms": body.get("timeout_ms", 60000),
+        },
+    )
+    steps.append(
+        {
+            "step": "make_selection_from_alpha_mask",
+            "job_id": make_result.get("job_id"),
+            "status": make_result.get("status"),
+            "selection": make_result.get("result", {}).get("selection"),
+        }
+    )
+    if make_result.get("status") != "done":
+        return {
+            "status": make_result.get("status", "error"),
+            "schema_version": "ps-agent/v1",
+            "tonal_range": tonal_range,
+            "channel_name": channel_name,
+            "steps": steps,
+            "message": "The alpha mask could not be written back to the active Photoshop selection.",
+            "job": make_result.get("job"),
         }
 
     for index, modify_step in enumerate(modify_steps):
@@ -1969,7 +2129,7 @@ def build_luminosity_mask_request(body: dict[str, Any]) -> dict[str, Any]:
         "channel_name": channel_name,
         "selection_kind": "luminosity_mask",
         "steps": steps,
-        "selection": select_result.get("result", {}).get("selection"),
+        "selection": make_result.get("result", {}).get("selection"),
         "channel": {
             "name": channel_name,
             "saved": True,
@@ -2136,6 +2296,20 @@ def create_api_job(job_type: str, body: dict[str, Any]) -> dict[str, Any]:
                 "error": {
                     "code": "invalid_selection_command",
                     "message": "Selection command validation failed.",
+                    "details": validation["errors"],
+                },
+            }
+
+    if job_type == "native_selection_mask":
+        validation = validate_native_selection_mask(body)
+        if not validation["valid"]:
+            return {
+                "status": "error",
+                "schema_version": "ps-agent/v1",
+                "valid": False,
+                "error": {
+                    "code": "invalid_native_selection_mask",
+                    "message": "Native selection request validation failed.",
                     "details": validation["errors"],
                 },
             }
@@ -2711,6 +2885,10 @@ class AgentHandler(BaseHTTPRequestHandler):
             json_response(self, 200, lower_region_to_path(body))
             return
 
+        if path == "/api/native-selection-mask/materialize":
+            json_response(self, 200, materialize_native_selection_mask(body, lambda relative_path: make_asset_url(self, relative_path)))
+            return
+
         if path == "/api/analyze-image-metrics":
             json_response(self, 200, analyze_image_metrics(body))
             return
@@ -3024,14 +3202,22 @@ class AgentHandler(BaseHTTPRequestHandler):
             json_response(self, 200, create_api_job(api_job_routes[path], body))
             return
 
-        selection_command_routes = {
+        native_selection_routes = {
             "/api/select-subject": "select_subject",
             "/api/select-sky": "select_sky",
+            "/api/select-color-range": "color_range",
+            "/api/select-focus-area": "focus_area",
+        }
+        if path in native_selection_routes:
+            payload = dict(body)
+            payload["action"] = native_selection_routes[path]
+            json_response(self, 200, create_api_job("native_selection_mask", payload))
+            return
+
+        selection_command_routes = {
             "/api/select-all": "select_all",
             "/api/deselect": "deselect",
             "/api/inverse-selection": "inverse",
-            "/api/select-color-range": "color_range",
-            "/api/select-focus-area": "focus_area",
             "/api/modify-selection": "modify",
             "/api/save-selection-channel": "save_selection",
             "/api/load-selection-channel": "load_selection",

@@ -2825,7 +2825,7 @@
         "properties": {
           "selection_mask": {
             "type": "object",
-            "description": "A ps-agent/v1 selection_mask object. Supports bbox, polygon, alpha_mask, current_selection, select_subject, select_sky, color_range, and composite sources."
+            "description": "A ps-agent/v1 selection_mask object. Supports bbox, polygon, alpha_mask, current_selection, and composite sources."
           },
           "wait": {
             "type": "boolean",
@@ -2854,13 +2854,13 @@
     {
       "name": "ps_select_subject",
       "title": "Photoshop Select Subject",
-      "description": "Use Photoshop's native Select Subject command to create an active selection.",
+      "description": "Use Photoshop's native Select Subject command, then immediately capture it as a reusable alpha mask artifact.",
       "transport": "http_job_queue",
       "endpoint": {
         "method": "POST",
         "path": "/api/select-subject"
       },
-      "job_type": "selection_command",
+      "job_type": "native_selection_mask",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -2902,13 +2902,13 @@
     {
       "name": "ps_select_sky",
       "title": "Photoshop Select Sky",
-      "description": "Use Photoshop's native Select Sky command to create an active sky selection.",
+      "description": "Use Photoshop's native Select Sky command, then immediately capture it as a reusable alpha mask artifact.",
       "transport": "http_job_queue",
       "endpoint": {
         "method": "POST",
         "path": "/api/select-sky"
       },
-      "job_type": "selection_command",
+      "job_type": "native_selection_mask",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -2950,13 +2950,13 @@
     {
       "name": "ps_select_color_range",
       "title": "Photoshop Color Range Selection",
-      "description": "Create an active selection with Photoshop's native Color Range command using sampled RGB or a named color preset.",
+      "description": "Run Photoshop's native Color Range command and return the result as a reusable soft alpha mask artifact.",
       "transport": "http_job_queue",
       "endpoint": {
         "method": "POST",
         "path": "/api/select-color-range"
       },
-      "job_type": "selection_command",
+      "job_type": "native_selection_mask",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -3021,13 +3021,13 @@
     {
       "name": "ps_extract_tonal_range",
       "title": "Extract Tonal Range Selection",
-      "description": "Create an active Photoshop selection from highlights, midtones, or shadows without hand-writing a Color Range preset.",
+      "description": "Run a tonal Color Range extraction and return the result as a reusable soft alpha mask artifact.",
       "transport": "http_job_queue",
       "endpoint": {
         "method": "POST",
         "path": "/api/extract-tonal-range"
       },
-      "job_type": "selection_command",
+      "job_type": "native_selection_mask",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -3084,13 +3084,13 @@
     {
       "name": "ps_select_highlights",
       "title": "Select Highlights",
-      "description": "Create an active selection from Photoshop highlights.",
+      "description": "Run Photoshop highlights extraction and return the result as a reusable soft alpha mask artifact.",
       "transport": "http_job_queue",
       "endpoint": {
         "method": "POST",
         "path": "/api/select-highlights"
       },
-      "job_type": "selection_command",
+      "job_type": "native_selection_mask",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -3142,13 +3142,13 @@
     {
       "name": "ps_select_midtones",
       "title": "Select Midtones",
-      "description": "Create an active selection from Photoshop midtones.",
+      "description": "Run Photoshop midtones extraction and return the result as a reusable soft alpha mask artifact.",
       "transport": "http_job_queue",
       "endpoint": {
         "method": "POST",
         "path": "/api/select-midtones"
       },
-      "job_type": "selection_command",
+      "job_type": "native_selection_mask",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -3200,13 +3200,13 @@
     {
       "name": "ps_select_shadows",
       "title": "Select Shadows",
-      "description": "Create an active selection from Photoshop shadows.",
+      "description": "Run Photoshop shadows extraction and return the result as a reusable soft alpha mask artifact.",
       "transport": "http_job_queue",
       "endpoint": {
         "method": "POST",
         "path": "/api/select-shadows"
       },
-      "job_type": "selection_command",
+      "job_type": "native_selection_mask",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -3347,13 +3347,13 @@
     {
       "name": "ps_select_focus_area",
       "title": "Photoshop Focus Area Selection",
-      "description": "Attempt Photoshop's native Focus Area command to create a selection from in-focus regions.",
+      "description": "Attempt Photoshop's native Focus Area command and return the result as a reusable soft alpha mask artifact.",
       "transport": "http_job_queue",
       "endpoint": {
         "method": "POST",
         "path": "/api/select-focus-area"
       },
-      "job_type": "selection_command",
+      "job_type": "native_selection_mask",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -3547,7 +3547,7 @@
     {
       "name": "ps_selection_command",
       "title": "Run Photoshop Selection Command",
-      "description": "Run a whitelisted Photoshop native selection command, including select_all, deselect, inverse, select_subject, select_sky, color_range, focus_area, modify, save_selection, and load_selection.",
+      "description": "Run a whitelisted current-selection Photoshop command: select_all, deselect, inverse, modify, save_selection, or load_selection.",
       "transport": "http_job_queue",
       "endpoint": {
         "method": "POST",
@@ -3561,7 +3561,7 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["select_subject", "select_sky", "select_all", "deselect", "inverse", "color_range", "focus_area", "modify", "save_selection", "load_selection"]
+            "enum": ["select_all", "deselect", "inverse", "modify", "save_selection", "load_selection"]
           },
           "operation": {
             "type": "string",
@@ -3674,7 +3674,7 @@
         "requires_user_confirmation": false,
         "returns_images": false
       },
-      "notes": "Codex must call this before ps_apply_plan. selection_mask supports operation=replace/add/subtract/intersect for bbox, polygon, color_range, select_subject, select_sky, and source=composite ordered items. source=color_range can be used multiple times with different presets/colors/fuzziness thresholds, then refined by subtracting subject/foreground selections. source=alpha_mask is replace-only and preserves soft mask edges from SAM/other mask generators. Global camera_raw_filter is the preferred main color-grading path. Non-destructive adjustment ops include adjust_hue_saturation, adjust_curves, adjust_levels, adjust_selective_color, adjust_gradient_map, and adjust_color_lookup. Experimental acr_ai_mask targets require plan.safety.allow_experimental_acr_masks=true; camera_raw_internal currently reports availability explicitly, while photoshop_selection_fallback works for subject/background/sky."
+      "notes": "Codex must call this before ps_apply_plan. selection_mask supports operation=replace/add/subtract/intersect for bbox, polygon, and source=composite ordered items. Native Photoshop selectors now return reusable alpha_mask artifacts first; pass those alpha masks into ps_make_selection or ps_apply_plan explicitly. source=alpha_mask is replace-only and preserves soft mask edges from SAM and other mask generators. Global camera_raw_filter is the preferred main color-grading path. Non-destructive adjustment ops include adjust_hue_saturation, adjust_curves, adjust_levels, adjust_selective_color, adjust_gradient_map, and adjust_color_lookup. Experimental acr_ai_mask targets require plan.safety.allow_experimental_acr_masks=true; camera_raw_internal currently reports availability explicitly, while photoshop_selection_fallback works for subject/background/sky."
     },
     {
       "name": "ps_apply_plan",
@@ -3723,7 +3723,7 @@
         "requires_user_confirmation": true,
         "returns_images": true
       },
-      "notes": "The UXP side executes document mutations inside executeAsModal. selection_mask source=alpha_mask downloads a full-document transparent PNG and loads its transparency as a soft selection before creating the adjustment layer mask. source=bbox/polygon uses PS 25 Selection API SelectionType REPLACE/EXTEND/DIMINISH/INTERSECT; source=color_range/select_subject/select_sky can also participate in composite add/subtract/intersect through temporary alpha-channel loading; source=composite applies ordered replace/add/subtract/intersect items. Use global camera_raw_filter for main color grading. Use adjust_hue_saturation, adjust_curves, adjust_levels, adjust_selective_color, adjust_gradient_map, and adjust_color_lookup for editable Photoshop adjustment layers; all can be constrained by selection_mask targets except camera_raw_filter's global smart-filter path. Experimental acr_ai_mask supports camera_raw_internal capability reporting and a working photoshop_selection_fallback for subject/background/sky."
+      "notes": "The UXP side executes document mutations inside executeAsModal. selection_mask source=alpha_mask prefers Imaging.putSelection and Imaging.putLayerMask with a full-document grayscale companion; source=bbox/polygon uses the PS 25 Selection API SelectionType REPLACE/EXTEND/DIMINISH/INTERSECT; source=composite applies ordered replace/add/subtract/intersect items only for hard-selection geometry. Native Photoshop selectors are captured immediately as alpha artifacts instead of being combined through temporary Photoshop selections. Use global camera_raw_filter for main color grading. Use adjust_hue_saturation, adjust_curves, adjust_levels, adjust_selective_color, adjust_gradient_map, and adjust_color_lookup for editable Photoshop adjustment layers; all can be constrained by selection_mask targets except camera_raw_filter's global smart-filter path. Experimental acr_ai_mask supports camera_raw_internal capability reporting and a working photoshop_selection_fallback for subject/background/sky."
     },
     {
       "name": "ps_delete_agent_group",

@@ -300,6 +300,7 @@ def build_alpha_outputs(
 
     alpha_path = asset_dir / "alpha_mask.png"
     luma_path = asset_dir / "alpha_luma.png"
+    raw_path = asset_dir / "alpha_mask.gray"
     mask_preview_path = asset_dir / "mask_preview.png"
     overlay_path = asset_dir / "overlay_preview.png"
 
@@ -307,17 +308,20 @@ def build_alpha_outputs(
     rgba.putalpha(doc_mask)
     rgba.save(alpha_path)
     doc_mask.save(luma_path)
+    raw_path.write_bytes(doc_mask.tobytes())
     crop_mask.save(mask_preview_path)
     overlay_image(source_image, crop_mask).save(overlay_path)
 
     return {
         "alpha_path": alpha_path,
         "luma_path": luma_path,
+        "raw_path": raw_path,
         "mask_preview_path": mask_preview_path,
         "overlay_path": overlay_path,
         "relative": {
             "alpha": f"{relative_prefix}/alpha_mask.png",
             "luma": f"{relative_prefix}/alpha_luma.png",
+            "raw": f"{relative_prefix}/alpha_mask.gray",
             "mask_preview": f"{relative_prefix}/mask_preview.png",
             "overlay": f"{relative_prefix}/overlay_preview.png",
         },
@@ -385,3 +389,68 @@ def compose_soft_masks(
         "include_count": len(include_paths),
         "exclude_count": exclude_count,
     }
+
+def materialize_full_document_alpha_mask(
+    raw_mask_path: Path,
+    asset_dir: Path,
+    relative_prefix: str,
+    document_size: dict[str, int],
+    threshold: float = 0.5,
+    feather: float = 0.0,
+    invert: bool = False,
+) -> dict[str, Any]:
+    from PIL import Image, ImageFilter, ImageOps
+
+    doc_width = document_size["width"]
+    doc_height = document_size["height"]
+    expected_size = doc_width * doc_height
+    payload = raw_mask_path.read_bytes()
+    if len(payload) != expected_size:
+        raise ValueError(
+            f"raw alpha payload size mismatch: expected {expected_size} bytes for {doc_width}x{doc_height}, got {len(payload)}"
+        )
+
+    doc_mask = Image.frombytes("L", (doc_width, doc_height), payload)
+    warnings: list[str] = []
+    if invert:
+        doc_mask = ImageOps.invert(doc_mask)
+        warnings.append("mask_inverted")
+    if feather > 0:
+        doc_mask = doc_mask.filter(ImageFilter.GaussianBlur(radius=max(0.1, float(feather))))
+        warnings.append("mask_feathered_in_backend")
+
+    selected_pixels = sum(doc_mask.histogram()[1:])
+    area_ratio = selected_pixels / float(doc_width * doc_height)
+    if selected_pixels == 0:
+        warnings.append("alpha_empty")
+    if area_ratio < 0.0001:
+        warnings.append("alpha_area_tiny")
+    if area_ratio > 0.95:
+        warnings.append("alpha_area_very_large")
+    if threshold != 0.5:
+        warnings.append("threshold is recorded for downstream tools; this alpha mask keeps soft edges")
+
+    alpha_path = asset_dir / "alpha_mask.png"
+    luma_path = asset_dir / "alpha_luma.png"
+    normalized_raw_path = asset_dir / "alpha_mask.gray"
+    rgba = Image.new("RGBA", (doc_width, doc_height), (255, 255, 255, 0))
+    rgba.putalpha(doc_mask)
+    rgba.save(alpha_path)
+    doc_mask.save(luma_path)
+    normalized_raw_path.write_bytes(doc_mask.tobytes())
+
+    return {
+        "alpha_path": alpha_path,
+        "luma_path": luma_path,
+        "raw_path": normalized_raw_path,
+        "relative": {
+            "alpha": f"{relative_prefix}/alpha_mask.png",
+            "luma": f"{relative_prefix}/alpha_luma.png",
+            "raw": f"{relative_prefix}/alpha_mask.gray",
+        },
+        "selected_pixels": selected_pixels,
+        "area_ratio": round(area_ratio, 8),
+        "mask_bbox": mask_document_bbox(doc_mask),
+        "warnings": warnings,
+    }
+

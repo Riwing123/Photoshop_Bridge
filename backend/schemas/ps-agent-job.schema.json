@@ -29,6 +29,7 @@
         "export_preview",
         "export_regions",
         "make_selection",
+        "native_selection_mask",
         "selection_command",
         "operation_recipe",
         "selection_recipe",

@@ -1087,17 +1087,13 @@ def main() -> int:
     selection_parser.add_argument("--no-wait", action="store_true", help="Return immediately after queueing the job.")
     selection_parser.add_argument("--timeout-ms", type=int, default=60000)
 
-    selection_command_parser = subparsers.add_parser("selection-command", help="Run a Photoshop native selection command.")
+    selection_command_parser = subparsers.add_parser("selection-command", help="Run a current-selection Photoshop command.")
     selection_command_parser.add_argument(
         "action",
         choices=[
-            "select_subject",
-            "select_sky",
             "select_all",
             "deselect",
             "inverse",
-            "color_range",
-            "focus_area",
             "modify",
             "save_selection",
             "load_selection",
@@ -1105,20 +1101,28 @@ def main() -> int:
     )
     selection_command_parser.add_argument("--operation", choices=["feather", "expand", "contract", "smooth", "border"])
     selection_command_parser.add_argument("--amount", type=float)
-    selection_command_parser.add_argument("--rgb", type=parse_rgb_arg, default=None, help="Color range sampled RGB, e.g. 32,40,38.")
-    selection_command_parser.add_argument(
+    selection_command_parser.add_argument("--channel-name", default=None)
+    selection_command_parser.add_argument("--no-wait", action="store_true")
+    selection_command_parser.add_argument("--timeout-ms", type=int, default=60000)
+
+    native_selection_parser = subparsers.add_parser("native-selection", help="Run a Photoshop native selector and capture it as a reusable alpha mask.")
+    native_selection_parser.add_argument(
+        "action",
+        choices=["select_subject", "select_sky", "color_range", "focus_area"],
+    )
+    native_selection_parser.add_argument("--rgb", type=parse_rgb_arg, default=None, help="Color range sampled RGB, e.g. 32,40,38.")
+    native_selection_parser.add_argument(
         "--preset",
         choices=["sampled", "reds", "yellows", "greens", "cyans", "blues", "magentas", "skin_tones", "highlights", "midtones", "shadows"],
     )
-    selection_command_parser.add_argument("--fuzziness", type=float, default=None)
-    selection_command_parser.add_argument("--localized-color-clusters", action="store_true")
-    selection_command_parser.add_argument("--in-focus-range", type=float, default=None)
-    selection_command_parser.add_argument("--noise-level", type=float, default=None)
-    selection_command_parser.add_argument("--channel-name", default=None)
-    selection_command_parser.add_argument("--feather", type=float, default=None)
-    selection_command_parser.add_argument("--invert", action="store_true")
-    selection_command_parser.add_argument("--no-wait", action="store_true")
-    selection_command_parser.add_argument("--timeout-ms", type=int, default=60000)
+    native_selection_parser.add_argument("--fuzziness", type=float, default=None)
+    native_selection_parser.add_argument("--localized-color-clusters", action="store_true")
+    native_selection_parser.add_argument("--in-focus-range", type=float, default=None)
+    native_selection_parser.add_argument("--noise-level", type=float, default=None)
+    native_selection_parser.add_argument("--feather", type=float, default=None)
+    native_selection_parser.add_argument("--invert", action="store_true")
+    native_selection_parser.add_argument("--no-wait", action="store_true")
+    native_selection_parser.add_argument("--timeout-ms", type=int, default=60000)
 
     apply_parser = subparsers.add_parser("apply", help="Validate and optionally apply a ps-agent/v1 edit plan.")
     apply_source = apply_parser.add_mutually_exclusive_group(required=True)
@@ -1399,18 +1403,36 @@ def main() -> int:
         optional_fields = {
             "operation": args.operation,
             "amount": args.amount,
+            "channel_name": args.channel_name,
+        }
+        payload.update({key: value for key, value in optional_fields.items() if value is not None})
+        print_json(request_json(args.base_url, "POST", "/api/selection-command", payload))
+        return 0
+
+    if args.command == "native-selection":
+        payload: dict[str, Any] = {
+            "action": args.action,
+            "wait": not args.no_wait,
+            "timeout_ms": args.timeout_ms,
+        }
+        optional_fields = {
             "color": args.rgb,
             "preset": args.preset,
             "fuzziness": args.fuzziness,
             "localized_color_clusters": args.localized_color_clusters if args.localized_color_clusters else None,
             "in_focus_range": args.in_focus_range,
             "noise_level": args.noise_level,
-            "channel_name": args.channel_name,
             "feather": args.feather,
             "invert": args.invert if args.invert else None,
         }
         payload.update({key: value for key, value in optional_fields.items() if value is not None})
-        print_json(request_json(args.base_url, "POST", "/api/selection-command", payload))
+        route_map = {
+            "select_subject": "/api/select-subject",
+            "select_sky": "/api/select-sky",
+            "color_range": "/api/select-color-range",
+            "focus_area": "/api/select-focus-area",
+        }
+        print_json(request_json(args.base_url, "POST", route_map[args.action], payload))
         return 0
 
     if args.command == "apply":

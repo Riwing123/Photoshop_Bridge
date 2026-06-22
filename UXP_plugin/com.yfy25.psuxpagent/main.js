@@ -4,6 +4,7 @@ const photoshop = require("photoshop");
 const app = photoshop.app;
 const core = photoshop.core;
 const action = photoshop.action;
+const imaging = photoshop.imaging;
 const constants = photoshop.constants || {};
 const fs = uxp.storage.localFileSystem;
 const storageFormats = uxp.storage.formats;
@@ -18,7 +19,7 @@ const REQUEST_TIMEOUT_MS = 6000;
 const BACKOFF_MIN_MS = 1000;
 const BACKOFF_MAX_MS = 8000;
 const DEFAULT_REGION_MAX_SIDE = 1536;
-const PLUGIN_VERSION = "0.11.22";
+const PLUGIN_VERSION = "0.12.4";
 const START_COMMAND = "python D:\\Photo_sontrol\\backend\\cli.py daemon start";
 const MIN_POLYGON_POINTS = 3;
 const MAX_POLYGON_POINTS = 256;
@@ -276,7 +277,7 @@ function fetchWithTimeout(url, options, timeoutMs) {
   ]);
 }
 
-async function requestJson(method, path, payload) {
+async function requestJson(method, path, payload, timeoutMs = REQUEST_TIMEOUT_MS) {
   const errors = [];
   for (const baseUrl of candidateBackendUrls()) {
     try {
@@ -292,7 +293,7 @@ async function requestJson(method, path, payload) {
         options.body = JSON.stringify(payload || {});
       }
 
-      const response = await fetchWithTimeout(`${baseUrl}${path}`, options, REQUEST_TIMEOUT_MS);
+      const response = await fetchWithTimeout(`${baseUrl}${path}`, options, timeoutMs);
       const text = await response.text();
       let data = {};
       if (text) {
@@ -313,8 +314,8 @@ async function requestJson(method, path, payload) {
   throw new Error(errors.join(" | "));
 }
 
-async function postJson(path, payload) {
-  return requestJson("POST", path, payload);
+async function postJson(path, payload, timeoutMs) {
+  return requestJson("POST", path, payload, timeoutMs);
 }
 
 async function getJson(path) {
@@ -1469,7 +1470,7 @@ async function clearSelection() {
 
 async function hasActiveSelection() {
   try {
-    await playAction([
+    const result = await playAction([
       {
         _obj: "get",
         _target: [
@@ -1479,7 +1480,8 @@ async function hasActiveSelection() {
         _options: { dialogOptions: "dontDisplay" }
       }
     ]);
-    return true;
+    const descriptor = result && result[0];
+    return Boolean(descriptor && descriptor.selection);
   } catch (error) {
     return false;
   }
@@ -2843,6 +2845,21 @@ async function makeLayerMaskFromSelection() {
   await activateCompositeChannelForSelectionWork();
 }
 
+function backendAssetUriFromWorkspacePath(assetPath) {
+  const normalized = String(assetPath || "").replace(/\\/g, "/");
+  const lower = normalized.toLowerCase();
+  const marker = "/backend/runtime/assets/";
+  const index = lower.indexOf(marker);
+  if (index < 0) {
+    return null;
+  }
+  const relative = normalized.slice(index + marker.length).split("/").filter(Boolean);
+  if (relative.length < 2) {
+    return null;
+  }
+  return `/assets/${encodeURIComponent(relative[0])}/${encodeURIComponent(relative[1])}`;
+}
+
 function alphaMaskAssetUri(mask) {
   const direct = mask.asset_uri || mask.uri;
   if (direct && /^https?:\/\//i.test(String(direct))) {
@@ -2851,22 +2868,91 @@ function alphaMaskAssetUri(mask) {
   if (direct) {
     return String(direct);
   }
-
-  const assetPath = String(mask.asset_path || "").replace(/\\/g, "/");
-  const lower = assetPath.toLowerCase();
-  const marker = "/backend/runtime/assets/";
-  const index = lower.indexOf(marker);
-  if (index >= 0) {
-    const relative = assetPath.slice(index + marker.length).split("/").filter(Boolean);
-    if (relative.length >= 2) {
-      return `/assets/${encodeURIComponent(relative[0])}/${encodeURIComponent(relative[1])}`;
-    }
+  const relativeUri = backendAssetUriFromWorkspacePath(mask.asset_path);
+  if (relativeUri) {
+    return relativeUri;
   }
   throw codedError(
     "alpha_mask_asset_missing",
     "selection_mask source alpha_mask requires asset_uri, uri, or an asset_path under backend/runtime/assets.",
     { asset_path: mask.asset_path || null, asset_uri: mask.asset_uri || mask.uri || null }
   );
+}
+
+function alphaMaskRawAssetUri(mask) {
+  const direct = mask.raw_asset_uri || mask.raw_uri;
+  if (direct && /^https?:\/\//i.test(String(direct))) {
+    return String(direct);
+  }
+  if (direct) {
+    return String(direct);
+  }
+  return backendAssetUriFromWorkspacePath(mask.raw_asset_path);
+}
+
+function alphaMaskRawDimensions(mask) {
+  const width = Math.round(Number(mask.mask_width || mask.width || 0));
+  const height = Math.round(Number(mask.mask_height || mask.height || 0));
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
+    return null;
+  }
+  return { width, height };
+}
+
+function uint8ArrayFromBinary(bytes) {
+  if (bytes instanceof Uint8Array) {
+    return bytes;
+  }
+  if (bytes instanceof ArrayBuffer) {
+    return new Uint8Array(bytes);
+  }
+  if (bytes && bytes.buffer instanceof ArrayBuffer) {
+    return new Uint8Array(bytes.buffer, bytes.byteOffset || 0, bytes.byteLength || bytes.length || 0);
+  }
+  return new Uint8Array(bytes || []);
+}
+
+async function createAlphaMaskImageDataFromRawAsset(mask) {
+  if (!imaging || typeof imaging.createImageDataFromBuffer !== "function") {
+    return null;
+  }
+  const rawUri = alphaMaskRawAssetUri(mask);
+  const dims = alphaMaskRawDimensions(mask);
+  if (!rawUri || !dims) {
+    return null;
+  }
+  const download = await downloadBinaryFromBackend(rawUri);
+  const rawBytes = uint8ArrayFromBinary(download.bytes);
+  const expectedSize = dims.width * dims.height;
+  if (rawBytes.length !== expectedSize) {
+    throw codedError(
+      "alpha_mask_raw_size_mismatch",
+      "alpha mask raw companion does not match the declared mask dimensions.",
+      {
+        raw_asset_uri: download.uri,
+        raw_asset_path: mask.raw_asset_path || null,
+        expected_size: expectedSize,
+        actual_size: rawBytes.length,
+        mask_width: dims.width,
+        mask_height: dims.height
+      }
+    );
+  }
+  const imageData = await imaging.createImageDataFromBuffer(rawBytes, {
+    width: dims.width,
+    height: dims.height,
+    components: 1,
+    chunky: false,
+    colorProfile: "Gray Gamma 2.2",
+    colorSpace: "Grayscale"
+  });
+  return {
+    imageData,
+    raw_asset_uri: download.uri,
+    raw_asset_path: mask.raw_asset_path || null,
+    mask_width: dims.width,
+    mask_height: dims.height
+  };
 }
 
 async function placeFileAsLayer(file, options = {}) {
@@ -2925,15 +3011,7 @@ async function loadActiveLayerTransparencyAsSelection() {
   ]);
 }
 
-async function selectAlphaMask(mask, operation) {
-  if (operation !== "replace") {
-    throw codedError(
-      "alpha_mask_operation_unavailable",
-      "alpha_mask currently supports operation=replace only. Generate a composited alpha mask for add/subtract/intersect behavior.",
-      { operation }
-    );
-  }
-
+async function selectAlphaMaskLegacy(mask) {
   const uri = alphaMaskAssetUri(mask);
   const download = await downloadBinaryFromBackend(uri);
   const tempFile = await writeTempBinaryFile(`codex-alpha-mask-${Date.now()}.png`, download.bytes);
@@ -2942,8 +3020,6 @@ async function selectAlphaMask(mask, operation) {
     await placeFileAsLayer(tempFile, { failureCode: "alpha_mask_import_failed", unavailableCode: "alpha_mask_import_unavailable", assetLabel: "alpha mask PNG" });
     tempLayerId = await getActiveLayerId();
     await loadActiveLayerTransparencyAsSelection();
-  } catch (error) {
-    throw error;
   } finally {
     if (tempLayerId != null) {
       try {
@@ -2953,14 +3029,104 @@ async function selectAlphaMask(mask, operation) {
       }
     }
   }
-
-  await featherSelection(mask.feather);
   return {
     asset_uri: download.uri,
     asset_path: mask.asset_path || null,
+    raw_asset_uri: mask.raw_asset_uri || null,
+    raw_asset_path: mask.raw_asset_path || null,
     threshold: mask.threshold == null ? 0.5 : Number(mask.threshold),
-    show_marching_ants: mask.show_marching_ants === true
+    show_marching_ants: mask.show_marching_ants === true,
+    implementation: "place_layer_transparency"
   };
+}
+
+async function putAlphaMaskAsSelection(mask, operation) {
+  if (operation !== "replace") {
+    throw codedError(
+      "alpha_mask_operation_unavailable",
+      "alpha_mask currently supports operation=replace only. Generate a composited alpha mask for add/subtract/intersect behavior.",
+      { operation }
+    );
+  }
+
+  let info = null;
+  const rawImage = await createAlphaMaskImageDataFromRawAsset(mask);
+  if (rawImage && imaging && typeof imaging.putSelection === "function") {
+    try {
+      await imaging.putSelection({
+        documentID: app.activeDocument && app.activeDocument.id,
+        imageData: rawImage.imageData,
+        replace: true,
+        targetBounds: { left: 0, top: 0 },
+        commandName: "Codex Alpha Mask Selection"
+      });
+      info = {
+        asset_uri: mask.asset_uri || mask.uri || null,
+        asset_path: mask.asset_path || null,
+        raw_asset_uri: rawImage.raw_asset_uri,
+        raw_asset_path: rawImage.raw_asset_path,
+        mask_width: rawImage.mask_width,
+        mask_height: rawImage.mask_height,
+        threshold: mask.threshold == null ? 0.5 : Number(mask.threshold),
+        show_marching_ants: mask.show_marching_ants === true,
+        implementation: "imaging.putSelection"
+      };
+    } finally {
+      try {
+        rawImage.imageData.dispose();
+      } catch (disposeError) {
+      }
+    }
+  }
+  if (!info) {
+    info = await selectAlphaMaskLegacy(mask);
+  }
+
+  await featherSelection(mask.feather);
+  return info;
+}
+
+async function putAlphaMaskAsLayerMask(mask, layerId) {
+  const rawImage = await createAlphaMaskImageDataFromRawAsset(mask);
+  if (rawImage && imaging && typeof imaging.putLayerMask === "function") {
+    try {
+      await imaging.putLayerMask({
+        documentID: app.activeDocument && app.activeDocument.id,
+        layerID: layerId,
+        kind: "user",
+        imageData: rawImage.imageData,
+        replace: true,
+        targetBounds: { left: 0, top: 0 },
+        commandName: "Codex Alpha Mask Layer Mask"
+      });
+      await activateCompositeChannelForSelectionWork();
+      return {
+        asset_uri: mask.asset_uri || mask.uri || null,
+        asset_path: mask.asset_path || null,
+        raw_asset_uri: rawImage.raw_asset_uri,
+        raw_asset_path: rawImage.raw_asset_path,
+        mask_width: rawImage.mask_width,
+        mask_height: rawImage.mask_height,
+        threshold: mask.threshold == null ? 0.5 : Number(mask.threshold),
+        show_marching_ants: mask.show_marching_ants === true,
+        implementation: "imaging.putLayerMask"
+      };
+    } finally {
+      try {
+        rawImage.imageData.dispose();
+      } catch (disposeError) {
+      }
+    }
+  }
+
+  const info = await putAlphaMaskAsSelection(mask, "replace");
+  await selectLayer(layerId);
+  await makeLayerMaskFromSelection();
+  return Object.assign({}, info, { implementation: "selection_to_layer_mask_fallback" });
+}
+
+async function selectAlphaMask(mask, operation) {
+  return putAlphaMaskAsSelection(mask, operation);
 }
 
 function selectionMaskLabel(mask) {
@@ -2983,6 +3149,10 @@ function selectionMaskInfo(mask, operation, extra) {
   if (mask.source === "alpha_mask") {
     info.asset_path = mask.asset_path || null;
     info.asset_uri = mask.asset_uri || mask.uri || null;
+    info.raw_asset_path = mask.raw_asset_path || null;
+    info.raw_asset_uri = mask.raw_asset_uri || mask.raw_uri || null;
+    info.mask_width = mask.mask_width || mask.width || null;
+    info.mask_height = mask.mask_height || mask.height || null;
     info.threshold = mask.threshold == null ? 0.5 : Number(mask.threshold);
     info.show_marching_ants = mask.show_marching_ants === true;
   }
@@ -3044,12 +3214,11 @@ async function applySingleSelectionMask(mask, state, operation, options) {
     if (alphaInfo) {
       opts.alphaInfo = alphaInfo;
     }
-  } else if (source === "color_range") {
-    await selectColorRangeSelectionMask(mask, operation);
-  } else if (source === "select_subject") {
-    await selectGeneratedSelectionMask(mask, operation, source, selectSubject);
-  } else if (source === "select_sky") {
-    await selectGeneratedSelectionMask(mask, operation, source, selectSky);
+  } else if (source === "color_range" || source === "select_subject" || source === "select_sky" || source === "focus_area") {
+    throw codedError(
+      "native_selection_mask_required",
+      `selection_mask source ${source} no longer executes directly in Photoshop. Call the corresponding native selector tool first and reuse its returned alpha_mask.`
+    );
   } else {
     throw codedError("unsupported_selection_source", `Unsupported selection_mask source: ${source}`);
   }
@@ -3542,6 +3711,15 @@ async function createAdjustmentLayerFromAtom(params, index, state, jobId) {
 
 async function applySelectionMaskToLayer(layerId, selectionMask, state) {
   const targetLayerId = layerId == null ? await getActiveLayerId() : layerId;
+  if (selectionMask && selectionMask.source === "alpha_mask" && !selectionMask.invert && numberParam(selectionMask.feather, 0, 0, 500) <= 0) {
+    await selectLayer(targetLayerId);
+    const maskInfo = await putAlphaMaskAsLayerMask(selectionMask, targetLayerId);
+    return {
+      layer_id: targetLayerId,
+      mask_applied: true,
+      selection: selectionMaskInfo(selectionMask, "replace", maskInfo)
+    };
+  }
   const maskInfo = await prepareSelectionMask({ type: "selection_mask", selection_mask: selectionMask }, state);
   await selectLayer(targetLayerId);
   await makeLayerMaskFromSelection();
@@ -8799,6 +8977,328 @@ async function makeSelection(job) {
 }
 
 
+function componentSampleToUint8(value, componentSize) {
+  if (componentSize === 16) {
+    return Math.max(0, Math.min(255, Math.round(Number(value || 0) / 257)));
+  }
+  if (componentSize === 32) {
+    return Math.max(0, Math.min(255, Math.round(Number(value || 0) * 255)));
+  }
+  return Math.max(0, Math.min(255, Math.round(Number(value || 0))));
+}
+
+function selectionPixelsToUint8(imageInfo, rawData) {
+  const componentSize = Number(imageInfo && imageInfo.component_size || 8);
+  const components = Math.max(1, Number(imageInfo && imageInfo.components || 1));
+  const values = rawData || [];
+  if (componentSize === 8 && components === 1 && values instanceof Uint8Array) {
+    return values;
+  }
+  const pixelCount = Math.floor(values.length / components);
+  const bytes = new Uint8Array(pixelCount);
+  for (let index = 0; index < pixelCount; index += 1) {
+    bytes[index] = componentSampleToUint8(values[index * components], componentSize);
+  }
+  return bytes;
+}
+
+function selectionImageDataInfo(imageData) {
+  return {
+    width: Number(imageData && imageData.width || 0),
+    height: Number(imageData && imageData.height || 0),
+    components: Number(imageData && imageData.components || 0),
+    component_size: Number(imageData && imageData.componentSize || 0),
+    pixel_format: imageData && imageData.pixelFormat || null,
+    color_space: imageData && imageData.colorSpace || null,
+    has_alpha: imageData && imageData.hasAlpha === true,
+    is_chunky: imageData && imageData.isChunky === true
+  };
+}
+
+async function readSelectionImageData(imageData, imageInfo) {
+  // ponytail: Adobe defaults to chunky; fullRange only matters for 16-bit data.
+  const options = imageInfo.component_size === 16
+    ? { chunky: true, fullRange: true }
+    : { chunky: true };
+  let data;
+  try {
+    data = await imageData.getData(options);
+  } catch (error) {
+    throw codedError(
+      "selection_capture_read_failed",
+      "Photoshop Imaging.getSelection returned image data, but getData failed.",
+      {
+        plugin_version: PLUGIN_VERSION,
+        image_data: imageInfo,
+        get_data: {
+          options,
+          error: String(error && error.message ? error.message : error)
+        }
+      }
+    );
+  }
+  const length = data && typeof data.length === "number" ? data.length : 0;
+  if (length > 0) {
+    return data;
+  }
+  throw codedError(
+    "selection_capture_empty",
+    "Photoshop reported selection bounds, but Imaging.getSelection returned an empty pixel buffer.",
+    {
+      plugin_version: PLUGIN_VERSION,
+      image_data: imageInfo,
+      get_data: { options, length }
+    }
+  );
+}
+
+function normalizedSelectionSourceBounds(bounds, docWidth, docHeight) {
+  if (!bounds || typeof bounds !== "object") {
+    return { left: 0, top: 0, width: docWidth, height: docHeight };
+  }
+  const left = Math.max(0, Math.min(docWidth, Math.round(Number(bounds.left || 0))));
+  const top = Math.max(0, Math.min(docHeight, Math.round(Number(bounds.top || 0))));
+  const right = bounds.right != null ? Math.round(Number(bounds.right)) : left + Math.round(Number(bounds.width || 0));
+  const bottom = bounds.bottom != null ? Math.round(Number(bounds.bottom)) : top + Math.round(Number(bounds.height || 0));
+  return {
+    left,
+    top,
+    width: Math.max(0, Math.min(docWidth - left, right - left)),
+    height: Math.max(0, Math.min(docHeight - top, bottom - top))
+  };
+}
+
+function liftSelectionPixelsToDocument(rawPixels, bounds, docWidth, docHeight, imageInfo) {
+  const region = normalizedSelectionSourceBounds(bounds, docWidth, docHeight);
+  const sourceWidth = Math.round(Number(imageInfo && imageInfo.width || 0));
+  const sourceHeight = Math.round(Number(imageInfo && imageInfo.height || 0));
+  if (sourceWidth * sourceHeight !== rawPixels.length || region.left + sourceWidth > docWidth || region.top + sourceHeight > docHeight) {
+    throw codedError(
+      "selection_capture_size_mismatch",
+      "Captured selection pixels did not fit the returned image dimensions and document bounds.",
+      {
+        expected_pixels: sourceWidth * sourceHeight,
+        actual_pixels: rawPixels.length,
+        source_bounds: region,
+        image_data: imageInfo,
+        document_width: docWidth,
+        document_height: docHeight
+      }
+    );
+  }
+  if (sourceWidth === docWidth && sourceHeight === docHeight && region.left === 0 && region.top === 0) {
+    return rawPixels;
+  }
+  const documentPixels = new Uint8Array(docWidth * docHeight);
+  for (let row = 0; row < sourceHeight; row += 1) {
+    const sourceOffset = row * sourceWidth;
+    const targetOffset = (region.top + row) * docWidth + region.left;
+    documentPixels.set(rawPixels.subarray(sourceOffset, sourceOffset + sourceWidth), targetOffset);
+  }
+  return documentPixels;
+}
+
+async function runNativeSelectionAction(actionName, payload) {
+  if (actionName === "select_subject") {
+    await selectSubject();
+    return;
+  }
+  if (actionName === "select_sky") {
+    await selectSky();
+    return;
+  }
+  if (actionName === "color_range") {
+    await selectColorRange(payload, "replace");
+    return;
+  }
+  if (actionName === "focus_area") {
+    await selectFocusArea(payload);
+    return;
+  }
+  throw codedError("unsupported_native_selection_command", `Unsupported native selection action: ${actionName}`);
+}
+
+async function captureSelectionAsFullDocumentMask(state, actionName) {
+  const doc = app.activeDocument;
+  const docWidth = Math.max(1, Math.round(Number(state && state.width || unitNumber(doc && doc.width, 1))));
+  const docHeight = Math.max(1, Math.round(Number(state && state.height || unitNumber(doc && doc.height, 1))));
+  if (!imaging || typeof imaging.getSelection !== "function") {
+    throw codedError(
+      "imaging_get_selection_unavailable",
+      "Photoshop Imaging.getSelection is unavailable in this build, so native selector masks cannot be captured as alpha assets."
+    );
+  }
+  const selectionObject = await imaging.getSelection({
+    documentID: doc && doc.id,
+    sourceBounds: { left: 0, top: 0, right: docWidth, bottom: docHeight }
+  });
+  const imageData = selectionObject && selectionObject.imageData;
+  if (!imageData || typeof imageData.getData !== "function") {
+    throw codedError(
+      "selection_capture_unavailable",
+      "Photoshop did not return selection image data after the native selector ran.",
+      { action: actionName, plugin_version: PLUGIN_VERSION }
+    );
+  }
+  const imageInfo = selectionImageDataInfo(imageData);
+  let documentPixels;
+  try {
+    const rawData = await readSelectionImageData(imageData, imageInfo);
+    const expectedValues = imageInfo.width * imageInfo.height * Math.max(1, imageInfo.components);
+    if (rawData.length !== expectedValues) {
+      throw codedError(
+        "selection_capture_buffer_mismatch",
+        "Photoshop returned a selection buffer whose length does not match its image metadata.",
+        {
+          plugin_version: PLUGIN_VERSION,
+          expected_values: expectedValues,
+          actual_values: rawData.length,
+          image_data: imageInfo,
+          source_bounds: selectionObject && selectionObject.sourceBounds || null
+        }
+      );
+    }
+    const selectionPixels = selectionPixelsToUint8(imageInfo, rawData);
+    documentPixels = liftSelectionPixelsToDocument(
+      selectionPixels,
+      selectionObject && selectionObject.sourceBounds,
+      docWidth,
+      docHeight,
+      imageInfo
+    );
+  } finally {
+    try {
+      imageData.dispose();
+    } catch (disposeError) {
+    }
+  }
+  const sourceBounds = normalizedSelectionSourceBounds(selectionObject && selectionObject.sourceBounds, docWidth, docHeight);
+  sourceBounds.width = imageInfo.width;
+  sourceBounds.height = imageInfo.height;
+  return {
+    document_pixels: documentPixels,
+    width: docWidth,
+    height: docHeight,
+    pixel_count: documentPixels.length,
+    source_bounds: sourceBounds,
+    image_data: imageInfo,
+    selection_kind: actionName
+  };
+}
+
+async function nativeSelectionMask(job) {
+  const payload = job.payload || {};
+  const state = await readDocumentState(false);
+  if (!state.has_active_document) {
+    return errorResult(job, "no_active_document", "No active Photoshop document is available.", state.error || null);
+  }
+
+  const actionName = String(payload.action || "");
+  let capture = null;
+  let modalError = null;
+  try {
+    await core.executeAsModal(async () => {
+      try {
+        await clearSelection();
+        await runNativeSelectionAction(actionName, payload);
+        if (!(await hasActiveSelection())) {
+          throw codedError(
+            "selection_empty",
+            `Native selector ${actionName} did not create a usable Photoshop selection before capture.`
+          );
+        }
+        capture = await captureSelectionAsFullDocumentMask(state, actionName);
+      } catch (error) {
+        modalError = capturedCodexError(error);
+        throw error;
+      } finally {
+        await clearSelection();
+      }
+    }, { commandName: `Codex Native Selection - ${actionName}`, timeOut: 60000 });
+  } catch (error) {
+    const sourceError = modalError || capturedCodexError(error) || {
+      code: null,
+      message: String(error && error.message ? error.message : error),
+      details: null
+    };
+    const message = sourceError.message;
+    const code = sourceError.code
+      ? sourceError.code
+      : message.toLowerCase().includes("modal") ? "modal_busy" : "native_selection_mask_failed";
+    return errorResult(job, code, message, sourceError.details);
+  }
+
+  try {
+    const upload = await uploadBinary(
+      `/uxp/assets/${encodeURIComponent(job.job_id)}/${encodeURIComponent(`${actionName}-selection.gray`)}`,
+      capture.document_pixels,
+      "application/octet-stream"
+    );
+    const asset = upload.asset || {};
+    capture.asset_id = asset.id || null;
+    capture.asset_uri = asset.uri || null;
+    capture.asset_path = asset.path || null;
+    capture.document_pixels = null;
+  } catch (error) {
+    return errorResult(
+      job,
+      "selection_upload_failed",
+      String(error && error.message ? error.message : error),
+      {
+        plugin_version: PLUGIN_VERSION,
+        source_bounds: capture && capture.source_bounds || null,
+        image_data: capture && capture.image_data || null
+      }
+    );
+  }
+
+  try {
+    const materialized = await postJson("/api/native-selection-mask/materialize", {
+      job_id: job.job_id,
+      action: actionName,
+      label: payload.label || null,
+      raw_asset_path: capture && capture.asset_path ? capture.asset_path : null,
+      document_size: { width: capture.width, height: capture.height },
+      threshold: payload.threshold == null ? 0.5 : Number(payload.threshold),
+      feather: payload.feather == null ? 0 : Number(payload.feather),
+      invert: payload.invert === true,
+      show_marching_ants: payload.show_marching_ants === true
+    }, Math.max(REQUEST_TIMEOUT_MS, Number(job.timeout_ms || 60000)));
+    if (materialized && materialized.status === "error") {
+      return errorResult(
+        job,
+        materialized.error && materialized.error.code ? materialized.error.code : "native_selection_materialize_failed",
+        materialized.error && materialized.error.message ? materialized.error.message : "Native selection mask materialization failed.",
+        materialized.error && materialized.error.details !== undefined ? materialized.error.details : null
+      );
+    }
+    return Object.assign({}, materialized, {
+      schema_version: "ps-agent/v1",
+      job_id: job.job_id,
+      status: "ok",
+      document: await readDocumentState(false),
+      capture: {
+        plugin_version: PLUGIN_VERSION,
+        pixel_count: capture.pixel_count,
+        source_bounds: capture.source_bounds,
+        image_data: capture.image_data
+      },
+      warnings: Array.isArray(materialized && materialized.warnings) ? materialized.warnings : []
+    });
+  } catch (error) {
+    return errorResult(
+      job,
+      "native_selection_materialize_failed",
+      String(error && error.message ? error.message : error),
+      {
+        plugin_version: PLUGIN_VERSION,
+        source_bounds: capture && capture.source_bounds || null,
+        image_data: capture && capture.image_data || null
+      }
+    );
+  }
+}
+
 async function selectionCommand(job) {
   const payload = job.payload || {};
   const state = await readDocumentState(false);
@@ -9374,21 +9874,8 @@ function selectionMaskFromCandidate(candidate) {
   const atomId = String(candidate.atom_id || "");
   const params = Object.assign({}, candidate.params || {});
   const label = candidate.candidate_id || atomId;
-  if (atomId === "selection.select_subject") {
-    return Object.assign({ source: "select_subject", label }, params);
-  }
-  if (atomId === "selection.select_sky") {
-    return Object.assign({ source: "select_sky", label }, params);
-  }
-  if (atomId === "selection.color_range") {
-    return Object.assign({ source: "color_range", label }, colorRangeParamsFromSeed(params));
-  }
-  if (atomId === "selection.tonal_range") {
-    const tonal = colorRangeParamsFromSeed(Object.assign({}, params, { seed_profile: params.seed_profile || params.preset }));
-    if (params.preset && ["highlights", "midtones", "shadows"].includes(params.preset)) {
-      tonal.preset = params.preset;
-    }
-    return Object.assign({ source: "color_range", label }, tonal);
+  if (["selection.select_subject", "selection.select_sky", "selection.color_range", "selection.tonal_range", "selection.focus_area"].includes(atomId)) {
+    return null;
   }
   if (atomId === "selection.bbox") {
     return Object.assign({ source: "bbox", label }, params);
@@ -9463,7 +9950,10 @@ async function runSelectionCandidate(candidate, state, recipeId) {
   }
 
   if (atomId === "selection.focus_area") {
-    await selectGeneratedSelectionMask(params, "replace", "focus_area", async () => selectFocusArea(params));
+    throw codedError(
+      "native_selection_mask_required",
+      "selection.focus_area is now a native alpha generator. Call the dedicated tool first and merge the returned alpha_mask instead."
+    );
   } else if (atomId === "selection.channel_load") {
     await loadSelectionChannel(params.channel_name, "replace");
   } else if (atomId === "selection.refine_edge") {
@@ -9737,6 +10227,10 @@ async function executeJob(job) {
 
   if (job.job_type === "make_selection") {
     return makeSelection(job);
+  }
+
+  if (job.job_type === "native_selection_mask") {
+    return nativeSelectionMask(job);
   }
 
   if (job.job_type === "selection_command") {

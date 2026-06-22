@@ -152,10 +152,18 @@ def _alpha_selection_mask(alpha: dict[str, Any] | str, label: str, feather: floa
     if isinstance(alpha, dict):
         path = alpha.get("path") or alpha.get("asset_path")
         uri = alpha.get("uri") or alpha.get("asset_uri")
+        raw_path = alpha.get("raw_path") or alpha.get("raw_asset_path")
+        raw_uri = alpha.get("raw_uri") or alpha.get("raw_asset_uri")
+        mask_width = alpha.get("mask_width") or alpha.get("width")
+        mask_height = alpha.get("mask_height") or alpha.get("height")
     else:
         path = str(alpha)
         uri = None
-    return {
+        raw_path = None
+        raw_uri = None
+        mask_width = None
+        mask_height = None
+    mask = {
         "source": "alpha_mask",
         "label": label,
         "asset_path": path,
@@ -164,6 +172,15 @@ def _alpha_selection_mask(alpha: dict[str, Any] | str, label: str, feather: floa
         "feather": feather,
         "invert": False,
     }
+    if raw_path:
+        mask["raw_asset_path"] = raw_path
+    if raw_uri:
+        mask["raw_asset_uri"] = raw_uri
+    if mask_width is not None:
+        mask["mask_width"] = mask_width
+    if mask_height is not None:
+        mask["mask_height"] = mask_height
+    return mask
 
 
 def _normalize_region_artifact(raw: dict[str, Any]) -> dict[str, Any]:
@@ -232,11 +249,19 @@ def _artifact_from_alpha_result(result: dict[str, Any], body: dict[str, Any], as
     region_id = safe_path_part(str(body.get("region_id") or label or "alpha_region"), "alpha_region")
     alpha_path = selection_mask.get("asset_path") if selection_mask else alpha.get("path")
     alpha_uri = selection_mask.get("asset_uri") if selection_mask else alpha.get("uri")
+    raw_asset_path = selection_mask.get("raw_asset_path") if selection_mask else alpha.get("raw_path")
+    raw_asset_uri = selection_mask.get("raw_asset_uri") if selection_mask else alpha.get("raw_uri")
+    mask_width = selection_mask.get("mask_width") if selection_mask else alpha.get("mask_width")
+    mask_height = selection_mask.get("mask_height") if selection_mask else alpha.get("mask_height")
     representations: dict[str, Any] = {
         "alpha_mask": {
             "type": "alpha_mask",
             "asset_path": alpha_path,
             "asset_uri": alpha_uri,
+            "raw_asset_path": raw_asset_path,
+            "raw_asset_uri": raw_asset_uri,
+            "mask_width": mask_width,
+            "mask_height": mask_height,
             "threshold": selection_mask.get("threshold", body.get("threshold", 0.5)) if selection_mask else body.get("threshold", 0.5),
             "feather": selection_mask.get("feather", body.get("feather", 0)) if selection_mask else body.get("feather", 0),
             "invert": bool(selection_mask.get("invert", False)) if selection_mask else False,

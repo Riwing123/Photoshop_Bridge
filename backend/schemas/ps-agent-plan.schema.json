@@ -318,9 +318,6 @@
             "current_selection",
             "bbox",
             "polygon",
-            "select_subject",
-            "select_sky",
-            "color_range",
             "composite",
             "alpha_mask"
           ]
@@ -530,10 +527,7 @@
           "enum": [
             "current_selection",
             "bbox",
-            "polygon",
-            "select_subject",
-            "select_sky",
-            "color_range"
+            "polygon"
           ]
         },
         "operation": {

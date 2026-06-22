@@ -11,6 +11,7 @@ MAX_MERGE_ITEMS = 24
 CANDIDATE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 HARD_BUS = "hard_selection"
 SOFT_BUS = "soft_alpha"
+GENERATOR_BUS = "native_alpha_generator"
 SELECTION_OPERATIONS = {"replace", "add", "subtract", "intersect"}
 
 
@@ -18,60 +19,60 @@ SELECTION_ATOMS: list[dict[str, Any]] = [
     {
         "atom_id": "selection.select_subject",
         "category": "native",
-        "bus": HARD_BUS,
+        "bus": GENERATOR_BUS,
         "status": "stable",
-        "summary": "Photoshop native Select Subject.",
-        "candidate_roles": ["base", "add", "subtract", "intersect", "protect"],
+        "summary": "Photoshop native Select Subject captured immediately as a reusable soft alpha artifact.",
+        "candidate_roles": ["base", "protect"],
         "params_schema": {"type": "object", "additionalProperties": True},
-        "returns": ["channel_name", "has_active_selection"],
+        "returns": ["alpha_mask", "artifact"],
         "failure_codes": ["select_subject_unavailable", "selection_empty", "modal_busy"],
     },
     {
         "atom_id": "selection.select_sky",
         "category": "native",
-        "bus": HARD_BUS,
+        "bus": GENERATOR_BUS,
         "status": "stable",
-        "summary": "Photoshop native Select Sky.",
-        "candidate_roles": ["base", "add", "subtract", "intersect"],
+        "summary": "Photoshop native Select Sky captured immediately as a reusable soft alpha artifact.",
+        "candidate_roles": ["base"],
         "params_schema": {"type": "object", "additionalProperties": True},
-        "returns": ["channel_name", "has_active_selection"],
+        "returns": ["alpha_mask", "artifact"],
         "failure_codes": ["select_sky_unavailable", "selection_empty", "modal_busy"],
     },
     {
         "atom_id": "selection.color_range",
         "category": "native",
-        "bus": HARD_BUS,
+        "bus": GENERATOR_BUS,
         "status": "calibrated_batchplay",
-        "summary": "Photoshop Color Range selection from sampled RGB or preset seed.",
-        "candidate_roles": ["base", "add", "subtract", "intersect"],
+        "summary": "Photoshop Color Range generator captured immediately as a reusable soft alpha artifact.",
+        "candidate_roles": ["base", "protect"],
         "params_schema": {"type": "object", "properties": {"preset": {"type": "string"}, "color": {"type": "object"}, "fuzziness": {"type": "number"}}},
         "seed_profiles": ["sampled", "reds", "yellows", "greens", "cyans", "blues", "magentas", "skin_tones", "highlights", "midtones", "shadows"],
         "feedback_tuning": ["fuzziness", "localized_color_clusters", "sampled color"],
-        "returns": ["channel_name", "has_active_selection"],
+        "returns": ["alpha_mask", "artifact"],
         "failure_codes": ["color_range_descriptor_unavailable", "selection_empty", "modal_busy"],
     },
     {
         "atom_id": "selection.tonal_range",
         "category": "native",
-        "bus": HARD_BUS,
+        "bus": GENERATOR_BUS,
         "status": "stable",
-        "summary": "Photoshop tonal Color Range seed for highlights, midtones, or shadows.",
-        "candidate_roles": ["base", "add", "subtract", "intersect"],
+        "summary": "Photoshop tonal Color Range generator for highlights, midtones, or shadows captured as soft alpha.",
+        "candidate_roles": ["base", "protect"],
         "params_schema": {"type": "object", "properties": {"preset": {"type": "string", "enum": ["highlights", "midtones", "shadows"]}, "fuzziness": {"type": "number"}}},
         "seed_profiles": ["lights_seed", "midtones_seed", "darks_seed"],
         "feedback_tuning": ["preset", "fuzziness", "feather"],
-        "returns": ["channel_name", "has_active_selection"],
+        "returns": ["alpha_mask", "artifact"],
         "failure_codes": ["selection_empty", "modal_busy"],
     },
     {
         "atom_id": "selection.focus_area",
         "category": "native",
-        "bus": HARD_BUS,
+        "bus": GENERATOR_BUS,
         "status": "calibrated_batchplay",
-        "summary": "Photoshop Focus Area selection.",
-        "candidate_roles": ["base", "add", "subtract", "intersect"],
+        "summary": "Photoshop Focus Area generator captured immediately as a reusable soft alpha artifact.",
+        "candidate_roles": ["base", "protect"],
         "params_schema": {"type": "object", "properties": {"in_focus_range": {"type": "number"}, "noise_level": {"type": "number"}}},
-        "returns": ["channel_name", "has_active_selection"],
+        "returns": ["alpha_mask", "artifact"],
         "failure_codes": ["focus_area_descriptor_unavailable", "selection_empty", "modal_busy"],
     },
     {
@@ -336,6 +337,8 @@ def validate_selection_recipe(payload: dict[str, Any]) -> dict[str, Any]:
                     continue
                 if atom.get("bus") == "detector":
                     warnings.append(f"{path} is a detector atom; lower detections to bbox or alpha-mask candidates before merging.")
+                if atom.get("bus") == GENERATOR_BUS:
+                    errors.append(f"{path}.atom_id={atom_id} is a native alpha generator, not an executable selection_recipe atom; call the dedicated tool first and merge the returned alpha_mask instead")
                 params = candidate.get("params")
                 if params is not None and not isinstance(params, dict):
                     errors.append(f"{path}.params must be an object when provided")
