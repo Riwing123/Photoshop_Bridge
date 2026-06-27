@@ -200,7 +200,7 @@ ps_skill/                        Codex 技能说明
 - `.venv-sam` 中的 Grounding DINO + HQ-SAM 环境
 
 ## 快速开始
-
+也可参考'Configure.md'
 ### 1. 克隆并创建环境
 
 ```powershell
@@ -311,13 +311,6 @@ python -m venv .venv-sam
 
 这是为了稳定性和隔离性。主后端保持更轻量，SAM / Grounding / HQ-SAM 依赖单独放在 `.venv-sam`，可以减少桥接主流程被重依赖拖垮的风险。
 
-### 5. 这个仓库已经适合直接开源发布了吗？
-
-基本可以作为技术展示或开发型仓库发布。当前仓库已经补充根目录 MIT License；如果公开前还想更完整一些，建议再补仓库截图、安装依赖说明，以及一两个典型工作流示例。
-
-### 6. 项目名称为什么写成 `Photoshop_bridge`？
-
-README 已按你的要求使用 `Photoshop_bridge` 作为对外展示名。如果你还希望仓库目录名、插件显示名、MCP server 名称也一起统一，我可以继续帮你整理一版重命名清单。
 
 ## 测试
 
